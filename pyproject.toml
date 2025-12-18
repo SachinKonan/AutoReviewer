@@ -1,19 +1,18 @@
 [project]
 name = "ml-cuda12-env"
 version = "0.1.0"
-description = "ML environment with CUDA 12 support"
-requires-python = ">=3.10,<3.11"
+description = "ML environment with CUDA 12.8 support"
+requires-python = "==3.12"
 
 dependencies = [
-    "vllm==0.11.2",
-    "transformers==4.57.1",
+    "vllm",
+    "transformers",
     # Torch stack (via CUDA 12.8 index below)
     "torch==2.9.0",
-    "torchvision==0.24.0",
-    "torchaudio==2.9.0",
+    "torchvision",
+    "torchaudio",
     # Ray with LLM extras
-    "ray==2.52.0",
-    "ray[llm]==2.52.0",
+    "ray[llm]",
     "accelerate==1.12.0",
     "datasets==4.4.1",
     "numpy==2.2.6",
@@ -21,12 +20,12 @@ dependencies = [
     "scikit-learn==1.7.2",
     "tqdm==4.67.1",
     "requests==2.32.5",
-    "fastapi==0.121.3",
+    "fastapi",
     "uvicorn==0.38.0",
-    "pydantic==2.12.4",
+    "pydantic",
     "blobfile==3.1.0",
-    "setuptools==80.9.0",
-    "flash-attn==2.8.0.post2",
+    "setuptools>=77.0.3,<80",
+    "flash-attn==2.8.1",
     "matplotlib==3.10.6",
     "peft==0.18.0",
     "backoff==2.2.1",
@@ -48,8 +47,9 @@ dependencies = [
     "chromadb==1.3.5",
     "google-generativeai>=0.8.5",
     "google-genai>=1.52.0",
-    "wandb==0.23.0",
-    "marker-pdf"
+    "wandb==0.23.0", # marker-pdf
+    "mineru[core,vllm]",
+    "pip>=25.3",
 ]
 
 [build-system]
@@ -76,11 +76,13 @@ url = "https://download.pytorch.org/whl/cu128"
 torch = { index = "torch-cu128" }
 torchvision = { index = "torch-cu128" }
 torchaudio = { index = "torch-cu128" }
+flash-attn = { url = "https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.1/flash_attn-2.8.1+cu12torch2.9cxx11abiTRUE-cp312-cp312-linux_x86_64.whl" }
 
 # Extra build hooks for flash-attn
 [tool.uv.extra-build-dependencies]
 flash-attn = [{ requirement = "torch", match-runtime = true }]
 
+# Skip CUDA build for flash-attn (use cached wheel)
 [tool.uv.extra-build-variables]
 flash-attn = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
 

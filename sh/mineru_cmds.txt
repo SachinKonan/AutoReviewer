@@ -1,0 +1,17 @@
+Pipeline: uv run mineru   -p /n/fs/vision-mix/sk7524/NipsIclrData/AutoReviewer/data/test_pdfs/2020/ryxz8CVYDH.pdf   -o /n/fs/vision-mix/sk7524/NipsIclrData/AutoReviewer/data/mddir2   --source local   -b pipeline   -m ocr --formula false
+VLM: uv run mineru   -p /n/fs/vision-mix/sk7524/NipsIclrData/AutoReviewer/data/test_pdfs/2020/ryxz8CVYDH.pdf   -o /n/fs/vision-mix/sk7524/NipsIclrData/AutoReviewer/data/mddir2   --source local   -b vlm-transformers
+
+
+source .venv/bin/activate
+
+nohup mineru-openai-server \
+  --engine vllm \
+  --port 30000 \
+  --data-parallel-size 1 \
+  > mineru-server.log 2>&1 &
+
+nohup mineru \
+  -p /n/fs/vision-mix/sk7524/NipsIclrData/AutoReviewer/data/full_run/pdfs/2020/B1e3OlStPB_HyBhJshoH.pdf \
+  -o /n/fs/vision-mix/sk7524/NipsIclrData/AutoReviewer/data/md_test_mineru \
+  -b vlm-vllm-engine \
+  > mineru-2020.log 2>&1

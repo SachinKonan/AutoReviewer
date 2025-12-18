@@ -2,3 +2,4 @@ data/
 .venv/
 .ipynb_checkpoints
 lib/__pycache__/
+MinerU/

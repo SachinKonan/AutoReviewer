@@ -1,0 +1,268 @@
+"""Analyze MinerU conversion statistics with content criteria."""
+import bisect
+import re
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from lib.submission import load_submissions_from_pickle
+from lib.utils import (
+    build_pdf_file_index,
+    find_pdf_path,
+    EXCLUDED_DECISIONS,
+    DEFAULT_YEARS,
+)
+
+# Regex patterns
+ABSTRACT_START = re.compile(r'^#\s*ABSTRACT', re.IGNORECASE | re.MULTILINE)
+REPROD_HEADER = re.compile(r'^#.*reprod', re.IGNORECASE | re.MULTILINE)
+GITHUB_PATTERN = re.compile(r'github', re.IGNORECASE)
+ANON_PATTERN = re.compile(r'anonymous', re.IGNORECASE)
+
+def classify_decision(decision: str) -> str:
+    """Classify decision as 'Accept', 'Reject', or 'Other'."""
+    if decision.startswith('Accept'):
+        return 'Accept'
+    elif decision == 'Reject':
+        return 'Reject'
+    else:
+        return 'Other'
+
+
+def build_mineru_index(mineru_dir: Path) -> dict[str, Path]:
+    """Build index mapping folder name -> markdown file path across all batches."""
+    index = {}
+    for batch_dir in sorted(mineru_dir.glob("batch_*")):
+        for sub_dir in batch_dir.iterdir():
+            if sub_dir.is_dir():
+                vlm_dir = sub_dir / "vlm"
+                if vlm_dir.exists():
+                    md_files = list(vlm_dir.glob("*.md"))
+                    if md_files:
+                        index[sub_dir.name] = md_files[0]
+    return index
+
+
+def find_mineru_by_prefix(
+    submission_id: str, sorted_keys: list[str], index: dict[str, Path]
+) -> Path | None:
+    """Find MinerU markdown by submission ID prefix using binary search."""
+    i = bisect.bisect_left(sorted_keys, submission_id)
+    if i < len(sorted_keys) and sorted_keys[i].startswith(submission_id):
+        return index[sorted_keys[i]]
+    return None
+
+
+def extract_abstract(md_text: str) -> str:
+    """Extract abstract section from markdown."""
+    match = ABSTRACT_START.search(md_text)
+    if not match:
+        return ""
+    start = match.end()
+    # Find next section header (# followed by number or # INTRODUCTION etc.)
+    next_header = re.search(r'^#\s+(?:\d|[A-Z])', md_text[start:], re.MULTILINE)
+    if next_header:
+        return md_text[start : start + next_header.start()]
+    return md_text[start : start + 2000]
+
+
+def analyze_paper(md_path: Path) -> tuple[bool, bool, bool]:
+    """
+    Analyze paper content for criteria.
+
+    Returns:
+        (has_github_in_abstract, has_reproducibility_header, no_anonymous_authors)
+    """
+    try:
+        text = md_path.read_text(encoding='utf-8')
+    except Exception:
+        return (False, False, False)
+
+    abstract = extract_abstract(text)
+    has_github = bool(GITHUB_PATTERN.search(abstract))
+    has_reprod = bool(REPROD_HEADER.search(text))
+    no_anon = not bool(ANON_PATTERN.search(text))
+
+    return (has_github, has_reprod, no_anon)
+
+
+def get_subset_key(c1: bool, c2: bool, c3: bool) -> str:
+    """Convert criteria booleans to subset key."""
+    key = ""
+    if c1:
+        key += "1"
+    if c2:
+        key += "2"
+    if c3:
+        key += "3"
+    return key if key else "none"
+
+
+def make_empty_counts(subset_keys: list[str]) -> dict:
+    """Create empty counts dict with example tracking."""
+    result = {'count': 0, 'pdfs': 0, 'mineru': 0}
+    for k in subset_keys:
+        result[k] = {'n': 0, 'ex': None}  # n=count, ex=example submission ID
+    return result
+
+
+def analyze_stats(data_dir: Path = Path("data/full_run")):
+    """Run the full analysis and print results table."""
+    pdf_dir = data_dir / "pdfs"
+    mineru_dir = data_dir / "md_mineru"
+
+    print("Building PDF index...")
+    pdf_index = build_pdf_file_index(pdf_dir, DEFAULT_YEARS)
+
+    print("Building MinerU index...")
+    mineru_index = build_mineru_index(mineru_dir)
+    mineru_keys = sorted(mineru_index.keys())
+    print(f"  Found {len(mineru_index)} MinerU conversions")
+
+    # Subset keys for counting
+    subset_keys = ['1', '2', '3', '12', '13', '23', '123', 'none']
+    decision_types = ['Accept', 'Reject']
+
+    # Results: year -> decision_type -> counts
+    results = []
+
+    # Totals by decision type
+    totals = {dt: make_empty_counts(subset_keys) for dt in decision_types}
+    totals['All'] = make_empty_counts(subset_keys)
+
+    print("\nAnalyzing papers by year...")
+    for year in DEFAULT_YEARS:
+        pkl_path = data_dir / f"get_all_notes_{year}.pickle"
+        if not pkl_path.exists():
+            print(f"  {year}: pickle not found, skipping")
+            continue
+
+        print(f"  {year}: loading submissions...")
+        subs = load_submissions_from_pickle(pkl_path, year)
+        non_wd = [s for s in subs if s.decision not in EXCLUDED_DECISIONS]
+
+        # Initialize year counts by decision type
+        year_counts = {dt: make_empty_counts(subset_keys) for dt in decision_types}
+
+        for s in non_wd:
+            dec_type = classify_decision(s.decision)
+            if dec_type not in decision_types:
+                continue  # Skip 'Other' (Unknown decisions)
+
+            year_counts[dec_type]['count'] += 1
+
+            # Check PDF
+            if find_pdf_path(s.id, year, pdf_index, pdf_dir):
+                year_counts[dec_type]['pdfs'] += 1
+
+            # Check MinerU + analyze
+            md_path = find_mineru_by_prefix(s.id, mineru_keys, mineru_index)
+            if md_path:
+                year_counts[dec_type]['mineru'] += 1
+                c1, c2, c3 = analyze_paper(md_path)
+                key = get_subset_key(c1, c2, c3)
+                year_counts[dec_type][key]['n'] += 1
+                # Store example if we don't have one yet for this year/decision
+                if year_counts[dec_type][key]['ex'] is None:
+                    year_counts[dec_type][key]['ex'] = s.id
+
+        # Store results
+        results.append({'year': year, 'counts': year_counts})
+
+        # Update totals
+        for dt in decision_types:
+            totals[dt]['count'] += year_counts[dt]['count']
+            totals[dt]['pdfs'] += year_counts[dt]['pdfs']
+            totals[dt]['mineru'] += year_counts[dt]['mineru']
+            totals['All']['count'] += year_counts[dt]['count']
+            totals['All']['pdfs'] += year_counts[dt]['pdfs']
+            totals['All']['mineru'] += year_counts[dt]['mineru']
+            for k in subset_keys:
+                totals[dt][k]['n'] += year_counts[dt][k]['n']
+                totals['All'][k]['n'] += year_counts[dt][k]['n']
+                # Keep first example found
+                if totals[dt][k]['ex'] is None and year_counts[dt][k]['ex']:
+                    totals[dt][k]['ex'] = year_counts[dt][k]['ex']
+                if totals['All'][k]['ex'] is None and year_counts[dt][k]['ex']:
+                    totals['All'][k]['ex'] = year_counts[dt][k]['ex']
+
+        acc = year_counts['Accept']
+        rej = year_counts['Reject']
+        print(f"  {year}: Accept={acc['count']} (MinerU={acc['mineru']}), Reject={rej['count']} (MinerU={rej['mineru']})")
+
+    # Helper to format cell with count and example
+    def fmt_cell(cell_data: dict, width: int = 20) -> str:
+        n = cell_data['n']
+        ex = cell_data['ex']
+        if ex:
+            return f"{n} ({ex[:11]})"[:width].rjust(width)
+        else:
+            return str(n).rjust(width)
+
+    # Print table
+    print("\n" + "=" * 220)
+    print("MinerU Statistics Analysis (by Year and Decision)")
+    print("=" * 220)
+    print("\nCriteria:")
+    print("  1 = Has 'github' (case-insensitive) in abstract")
+    print("  2 = Has reproducibility header (# ... reprod ...)")
+    print("  3 = Does NOT contain 'anonymous'")
+    print()
+
+    # Header
+    header = f"{'Year':<6} {'Dec':<7} {'Count':>7} {'PDFs':>7} {'MinerU':>7}"
+    header += f" {'none':>20} {'1':>20} {'2':>20} {'3':>20} {'12':>20} {'13':>20} {'23':>20} {'123':>20}"
+    print(header)
+    print("-" * 220)
+
+    # Data rows
+    for entry in results:
+        year = entry['year']
+        for dt in decision_types:
+            c = entry['counts'][dt]
+            line = f"{year:<6} {dt:<7} {c['count']:>7} {c['pdfs']:>7} {c['mineru']:>7}"
+            for key in ['none', '1', '2', '3', '12', '13', '23', '123']:
+                line += f" {fmt_cell(c[key])}"
+            print(line)
+        print()  # Blank line between years
+
+    # Total rows
+    print("-" * 220)
+    for dt in decision_types:
+        c = totals[dt]
+        line = f"{'Total':<6} {dt:<7} {c['count']:>7} {c['pdfs']:>7} {c['mineru']:>7}"
+        for key in ['none', '1', '2', '3', '12', '13', '23', '123']:
+            line += f" {fmt_cell(c[key])}"
+        print(line)
+
+    # Grand total
+    c = totals['All']
+    line = f"{'Total':<6} {'All':<7} {c['count']:>7} {c['pdfs']:>7} {c['mineru']:>7}"
+    for key in ['none', '1', '2', '3', '12', '13', '23', '123']:
+        line += f" {fmt_cell(c[key])}"
+    print(line)
+    print("=" * 220)
+
+    # Summary
+    print("\nSummary:")
+    for dt in ['Accept', 'Reject', 'All']:
+        t = totals[dt]
+        if t['count'] > 0:
+            print(f"\n  {dt}:")
+            print(f"    Total: {t['count']}")
+            print(f"    With PDF: {t['pdfs']} ({100*t['pdfs']/t['count']:.1f}%)")
+            print(f"    With MinerU: {t['mineru']} ({100*t['mineru']/t['count']:.1f}%)")
+
+            if t['mineru'] > 0:
+                has_github = t['1']['n'] + t['12']['n'] + t['13']['n'] + t['123']['n']
+                has_reprod = t['2']['n'] + t['12']['n'] + t['23']['n'] + t['123']['n']
+                no_anon = t['3']['n'] + t['13']['n'] + t['23']['n'] + t['123']['n']
+                print(f"    Among MinerU-converted:")
+                print(f"      Has github in abstract: {has_github} ({100*has_github/t['mineru']:.1f}%)")
+                print(f"      Has reproducibility header: {has_reprod} ({100*has_reprod/t['mineru']:.1f}%)")
+                print(f"      No 'anonymous': {no_anon} ({100*no_anon/t['mineru']:.1f}%)")
+
+
+if __name__ == "__main__":
+    analyze_stats()
