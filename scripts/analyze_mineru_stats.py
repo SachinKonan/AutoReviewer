@@ -1,5 +1,7 @@
 """Analyze MinerU conversion statistics with content criteria."""
 import bisect
+import csv
+import os
 import re
 import sys
 from pathlib import Path
@@ -30,24 +32,53 @@ def classify_decision(decision: str) -> str:
         return 'Other'
 
 
-def build_mineru_index(mineru_dir: Path) -> dict[str, Path]:
-    """Build index mapping folder name -> markdown file path across all batches."""
+def build_mineru_index(mineru_dir: Path) -> tuple[dict[str, Path], dict[str, Path]]:
+    """Build index mapping folder name -> markdown file path across all batches.
+
+    Returns:
+        (index, fixed_2020_index): Main index and separate index for batch_2020_fixed.
+        Both map folder_name -> md_path. Use prefix matching for lookups.
+    """
     index = {}
+    fixed_2020_index = {}
+
     for batch_dir in sorted(mineru_dir.glob("batch_*")):
-        for sub_dir in batch_dir.iterdir():
-            if sub_dir.is_dir():
-                vlm_dir = sub_dir / "vlm"
-                if vlm_dir.exists():
-                    md_files = list(vlm_dir.glob("*.md"))
-                    if md_files:
-                        index[sub_dir.name] = md_files[0]
-    return index
+        is_fixed_2020 = batch_dir.name == "batch_2020_fixed"
+        # Use scandir for efficiency on NFS - caches is_dir() result
+        with os.scandir(batch_dir) as entries:
+            for entry in entries:
+                if entry.is_dir():
+                    # Construct md path directly: vlm/{folder_name}.md
+                    folder_name = entry.name
+                    md_path = Path(entry.path) / "vlm" / f"{folder_name}.md"
+                    if md_path.exists():
+                        index[folder_name] = md_path
+                        if is_fixed_2020:
+                            fixed_2020_index[folder_name] = md_path
+
+    return index, fixed_2020_index
 
 
 def find_mineru_by_prefix(
-    submission_id: str, sorted_keys: list[str], index: dict[str, Path]
+    submission_id: str,
+    sorted_keys: list[str],
+    index: dict[str, Path],
+    year: int = None,
+    fixed_2020_keys: list[str] = None,
+    fixed_2020_index: dict[str, Path] = None,
 ) -> Path | None:
-    """Find MinerU markdown by submission ID prefix using binary search."""
+    """Find MinerU markdown by submission ID prefix using binary search.
+
+    For year=2020, checks fixed_2020_index first (if provided) to prefer
+    batch_2020_fixed over other batches.
+    """
+    # For 2020 submissions, check fixed index first
+    if year == 2020 and fixed_2020_keys and fixed_2020_index:
+        i = bisect.bisect_left(fixed_2020_keys, submission_id)
+        if i < len(fixed_2020_keys) and fixed_2020_keys[i].startswith(submission_id):
+            return fixed_2020_index[fixed_2020_keys[i]]
+
+    # Fall back to main index
     i = bisect.bisect_left(sorted_keys, submission_id)
     if i < len(sorted_keys) and sorted_keys[i].startswith(submission_id):
         return index[sorted_keys[i]]
@@ -116,9 +147,11 @@ def analyze_stats(data_dir: Path = Path("data/full_run")):
     pdf_index = build_pdf_file_index(pdf_dir, DEFAULT_YEARS)
 
     print("Building MinerU index...")
-    mineru_index = build_mineru_index(mineru_dir)
+    mineru_index, fixed_2020_index = build_mineru_index(mineru_dir)
     mineru_keys = sorted(mineru_index.keys())
+    fixed_2020_keys = sorted(fixed_2020_index.keys())
     print(f"  Found {len(mineru_index)} MinerU conversions")
+    print(f"  Found {len(fixed_2020_index)} in batch_2020_fixed (preferred for 2020)")
 
     # Subset keys for counting
     subset_keys = ['1', '2', '3', '12', '13', '23', '123', 'none']
@@ -126,6 +159,9 @@ def analyze_stats(data_dir: Path = Path("data/full_run")):
 
     # Results: year -> decision_type -> counts
     results = []
+
+    # CSV rows: (submission_id, md_path, pdf_path, year, violation)
+    csv_rows = []
 
     # Totals by decision type
     totals = {dt: make_empty_counts(subset_keys) for dt in decision_types}
@@ -153,11 +189,15 @@ def analyze_stats(data_dir: Path = Path("data/full_run")):
             year_counts[dec_type]['count'] += 1
 
             # Check PDF
-            if find_pdf_path(s.id, year, pdf_index, pdf_dir):
+            pdf_path = find_pdf_path(s.id, year, pdf_index, pdf_dir)
+            if pdf_path:
                 year_counts[dec_type]['pdfs'] += 1
 
-            # Check MinerU + analyze
-            md_path = find_mineru_by_prefix(s.id, mineru_keys, mineru_index)
+            # Check MinerU + analyze (prefer batch_2020_fixed for 2020)
+            md_path = find_mineru_by_prefix(
+                s.id, mineru_keys, mineru_index,
+                year=year, fixed_2020_keys=fixed_2020_keys, fixed_2020_index=fixed_2020_index
+            )
             if md_path:
                 year_counts[dec_type]['mineru'] += 1
                 c1, c2, c3 = analyze_paper(md_path)
@@ -166,6 +206,15 @@ def analyze_stats(data_dir: Path = Path("data/full_run")):
                 # Store example if we don't have one yet for this year/decision
                 if year_counts[dec_type][key]['ex'] is None:
                     year_counts[dec_type][key]['ex'] = s.id
+                # Collect CSV row
+                csv_rows.append({
+                    'submission_id': s.id,
+                    'md_path': str(md_path),
+                    'pdf_path': str(pdf_path) if pdf_path else '',
+                    'year': year,
+                    'decision': dec_type,
+                    'violation': key,
+                })
 
         # Store results
         results.append({'year': year, 'counts': year_counts})
@@ -262,6 +311,14 @@ def analyze_stats(data_dir: Path = Path("data/full_run")):
                 print(f"      Has github in abstract: {has_github} ({100*has_github/t['mineru']:.1f}%)")
                 print(f"      Has reproducibility header: {has_reprod} ({100*has_reprod/t['mineru']:.1f}%)")
                 print(f"      No 'anonymous': {no_anon} ({100*no_anon/t['mineru']:.1f}%)")
+
+    # Write CSV
+    csv_path = data_dir / "mineru_violations.csv"
+    with open(csv_path, 'w', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=['submission_id', 'md_path', 'pdf_path', 'year', 'decision', 'violation'])
+        writer.writeheader()
+        writer.writerows(csv_rows)
+    print(f"\nCSV written to: {csv_path} ({len(csv_rows)} rows)")
 
 
 if __name__ == "__main__":
