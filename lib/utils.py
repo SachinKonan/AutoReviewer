@@ -620,8 +620,410 @@ def get_coverage_stats(
     return {'years': summary, 'totals': totals}
 
 
+# =============================================================================
+# PIPELINE STATISTICS (Full pipeline from submissions to images)
+# =============================================================================
+
+def build_mineru_index(mineru_dir: Path) -> tuple[dict[str, Path], dict[str, Path], dict[str, Path]]:
+    """Build index mapping folder name -> content_list.json path across all batches.
+
+    Uses os.scandir() for fast directory traversal.
+
+    Returns:
+        (index, fixed_index, fixed_pt2_index):
+        - index: all batches
+        - fixed_index: batch_2020_fixed only
+        - fixed_pt2_index: batch_2020_fixed_pt2 only (highest priority for 2020)
+    """
+    index = {}
+    fixed_index = {}
+    fixed_pt2_index = {}
+
+    for batch_dir in sorted(mineru_dir.glob("batch_*")):
+        batch_name = batch_dir.name
+        with os.scandir(batch_dir) as entries:
+            for entry in entries:
+                if entry.is_dir():
+                    folder_name = entry.name
+                    content_list_path = Path(entry.path) / "vlm" / f"{folder_name}_content_list.json"
+                    if content_list_path.exists() and content_list_path.stat().st_size > 10:
+                        index[folder_name] = content_list_path
+                        if batch_name == "batch_2020_fixed":
+                            fixed_index[folder_name] = content_list_path
+                        elif batch_name == "batch_2020_fixed_pt2":
+                            fixed_pt2_index[folder_name] = content_list_path
+
+    return index, fixed_index, fixed_pt2_index
+
+
+def build_normalized_index(normalized_dir: Path) -> dict[str, dict]:
+    """Build index of normalized outputs using os.scandir().
+
+    Returns:
+        Dict mapping submission_id -> {
+            'pdf': bool,
+            'meta_path': Path|None,
+            'image_count': int,
+            'meta': dict|None  # Loaded meta.json fields
+        }
+    """
+    import json
+    index = {}
+
+    if not normalized_dir.exists():
+        return index
+
+    with os.scandir(normalized_dir) as year_entries:
+        for year_entry in year_entries:
+            if not year_entry.is_dir():
+                continue
+            with os.scandir(year_entry.path) as sub_entries:
+                for sub_entry in sub_entries:
+                    if not sub_entry.is_dir():
+                        continue
+                    sub_id = sub_entry.name
+                    sub_path = Path(sub_entry.path)
+                    pdf_path = sub_path / f"{sub_id}.pdf"
+                    meta_path = sub_path / f"{sub_id}_meta.json"
+                    img_dir = sub_path / "redacted_pdf_img_content"
+
+                    # Count images using scandir (fast)
+                    image_count = 0
+                    if img_dir.exists():
+                        with os.scandir(img_dir) as img_entries:
+                            for img_entry in img_entries:
+                                if img_entry.name.startswith("page_") and img_entry.name.endswith(".png"):
+                                    image_count += 1
+
+                    # Load meta.json if exists
+                    meta_data = None
+                    if meta_path.exists():
+                        try:
+                            with open(meta_path) as f:
+                                m = json.load(f)
+                            meta_data = {
+                                'has_abstract': m.get('has_abstract', False),
+                                'has_references': m.get('has_references', False),
+                                'page_end': m.get('page_end', 0),
+                                'original_pdf_path': m.get('original_pdf_path'),
+                                'anonymized_abstract': m.get('anonymized_abstract', ''),
+                                'removed_before_intro_count': m.get('removed_before_intro_count', 0),
+                                'removed_footnotes_count': m.get('removed_footnotes_count', 0),
+                                'removed_reproducibility_count': m.get('removed_reproducibility_count', 0),
+                                'removed_acknowledgments_count': m.get('removed_acknowledgments_count', 0),
+                                'removed_github_in_abstract': m.get('removed_github_in_abstract', False),
+                                'headers_whiteout_count': m.get('headers_whiteout_count', 0),
+                            }
+                        except Exception:
+                            pass
+
+                    index[sub_id] = {
+                        'pdf': pdf_path.exists(),
+                        'meta_path': meta_path if meta_path.exists() else None,
+                        'image_count': image_count,
+                        'meta': meta_data
+                    }
+
+    return index
+
+
+def _mineru_prefix_lookup(submission_id: str, sorted_keys: list[str], index: dict[str, Path]) -> tuple[str, Path] | None:
+    """Binary search for submission_id prefix in sorted keys."""
+    i = bisect.bisect_left(sorted_keys, submission_id)
+    if i < len(sorted_keys) and sorted_keys[i].startswith(submission_id):
+        folder_name = sorted_keys[i]
+        return folder_name, index[folder_name]
+    return None
+
+
+def find_mineru_by_prefix(
+    submission_id: str,
+    sorted_keys: list[str],
+    index: dict[str, Path],
+    year: int = None,
+    fixed_keys: list[str] = None,
+    fixed_index: dict[str, Path] = None,
+    fixed_pt2_keys: list[str] = None,
+    fixed_pt2_index: dict[str, Path] = None,
+) -> tuple[str, Path] | None:
+    """Find MinerU content_list by submission ID prefix using binary search.
+
+    For year=2020, checks indices in priority order:
+    1. fixed_pt2_index (batch_2020_fixed_pt2) - highest priority
+    2. fixed_index (batch_2020_fixed)
+    3. main index (all batches)
+    """
+    if year == 2020:
+        if fixed_pt2_keys and fixed_pt2_index:
+            result = _mineru_prefix_lookup(submission_id, fixed_pt2_keys, fixed_pt2_index)
+            if result:
+                return result
+        if fixed_keys and fixed_index:
+            result = _mineru_prefix_lookup(submission_id, fixed_keys, fixed_index)
+            if result:
+                return result
+
+    return _mineru_prefix_lookup(submission_id, sorted_keys, index)
+
+
+def get_pipeline_stats(
+    data_dir: str | Path = "data/full_run",
+    years: list[int] = None,
+    show_drops: int = 0
+) -> None:
+    """Print comprehensive pipeline statistics table.
+
+    Tracks: submissions -> reviewable -> PDFs -> MinerU -> valid MinerU -> valid paper -> redacted -> images
+
+    Uses fast os.scandir() indexing for all directory operations.
+
+    Args:
+        data_dir: Directory containing pickle files, pdfs/, md_mineru/, normalized/
+        years: List of years to include (default: 2020-2026)
+        show_drops: Number of examples per year of papers that dropped from ValidMD to HasAbsRef (0 = disabled)
+    """
+    import json
+    from collections import defaultdict
+    from lib.submission import load_submissions_from_pickle
+
+    data_dir = Path(data_dir)
+    years = years or DEFAULT_YEARS
+
+    print("Building indices...")
+
+    # 1. Build PDF index (by year, sorted stems for binary search)
+    pdf_index = build_pdf_file_index(data_dir / "pdfs", years)
+    print(f"  PDF index: {sum(len(v) for v in pdf_index.values())} files")
+
+    # 2. Build MinerU index
+    mineru_dir = data_dir / "md_mineru"
+    mineru_index, fixed_index, fixed_pt2_index = build_mineru_index(mineru_dir)
+    sorted_keys = sorted(mineru_index.keys())
+    fixed_keys = sorted(fixed_index.keys())
+    fixed_pt2_keys = sorted(fixed_pt2_index.keys())
+    print(f"  MinerU index: {len(mineru_index)} folders")
+
+    # 3. Build normalized index
+    normalized_index = build_normalized_index(data_dir / "normalized")
+    print(f"  Normalized index: {len(normalized_index)} submissions")
+
+    # 4. Iterate through submissions and collect stats
+    rows = []
+    drops = defaultdict(list)  # Track drops from ValidMD -> HasAbsRef per year
+
+    for year in tqdm(years, desc="Processing years"):
+        pickle_path = data_dir / f'get_all_notes_{year}.pickle'
+        if not pickle_path.exists():
+            continue
+
+        subs = load_submissions_from_pickle(pickle_path, year)
+        year_pdfs = pdf_index.get(year, [])
+
+        for s in subs:
+            is_reviewable = s.decision not in EXCLUDED_DECISIONS
+
+            # PDF exists?
+            has_pdf = _find_by_prefix(year_pdfs, s.id)
+
+            # MinerU exists?
+            mineru_result = find_mineru_by_prefix(
+                s.id, sorted_keys, mineru_index,
+                year=year,
+                fixed_keys=fixed_keys, fixed_index=fixed_index,
+                fixed_pt2_keys=fixed_pt2_keys, fixed_pt2_index=fixed_pt2_index
+            )
+            has_mineru = mineru_result is not None
+
+            # Valid MinerU (md file size > 100 bytes)?
+            valid_mineru = False
+            mineru_md_path = None
+            if mineru_result:
+                folder_name, content_list_path = mineru_result
+                mineru_md_path = content_list_path.parent / f"{folder_name}.md"
+                if mineru_md_path.exists():
+                    try:
+                        valid_mineru = mineru_md_path.stat().st_size > 100
+                    except:
+                        pass
+
+            # Normalized outputs?
+            norm_info = normalized_index.get(s.id, {})
+            has_redacted = norm_info.get('pdf', False)
+            image_count = norm_info.get('image_count', 0)
+            meta = norm_info.get('meta')  # Pre-loaded meta.json fields
+
+            # Valid paper (from meta: page_end > 0, has_abstract, has_references)?
+            valid_paper = False
+            has_images = False
+            is_clean = False
+            drop_reason = None
+            paper_meta = None  # For manipulation stats
+
+            if meta:
+                page_end = meta.get('page_end', 0)
+                has_abs = meta.get('has_abstract', False)
+                has_refs = meta.get('has_references', False)
+                valid_paper = page_end > 0 and has_abs and has_refs
+
+                # Images valid only if count matches page_end + 1 (page_end is 0-indexed)
+                has_images = image_count == page_end + 1 and page_end >= 0
+
+                # Clean: no github in abstract (removed_github_in_abstract == False) AND has_abstract
+                no_github = not meta.get('removed_github_in_abstract', False)
+                is_clean = has_abs and no_github
+
+                # Store meta for manipulation stats
+                paper_meta = meta
+
+                # Track drop reason if valid_mineru but not valid_paper
+                if valid_mineru and not valid_paper and is_reviewable:
+                    reasons = []
+                    if page_end == 0:
+                        reasons.append('page_end=0')
+                    if not has_abs:
+                        reasons.append('no_abstract')
+                    if not has_refs:
+                        reasons.append('no_references')
+                    drop_reason = ', '.join(reasons) if reasons else 'unknown'
+
+            # Collect drop examples
+            if drop_reason and mineru_md_path:
+                drops[year].append({
+                    'id': s.id,
+                    'reason': drop_reason,
+                    'md_path': str(mineru_md_path),
+                })
+
+            rows.append({
+                'year': year,
+                'id': s.id,
+                'reviewable': is_reviewable,
+                'has_pdf': has_pdf,
+                'has_mineru': has_mineru,
+                'valid_mineru': valid_mineru,
+                'valid_paper': valid_paper,
+                'has_redacted': has_redacted,
+                'has_images': has_images,
+                'is_clean': is_clean,
+                'meta': paper_meta,  # For manipulation table
+            })
+
+    # 5. Build and print summary table
+    summary = []
+    manipulation_stats = defaultdict(lambda: defaultdict(int))  # year -> stat_name -> count
+
+    for year in years:
+        year_rows = [r for r in rows if r['year'] == year]
+        if not year_rows:
+            continue
+
+        total = len(year_rows)
+        reviewable = sum(1 for r in year_rows if r['reviewable'])
+        # Each stage is a cumulative subset of the previous
+        has_pdf = sum(1 for r in year_rows if r['reviewable'] and r['has_pdf'])
+        has_mineru = sum(1 for r in year_rows if r['reviewable'] and r['has_pdf'] and r['has_mineru'])
+        valid_mineru = sum(1 for r in year_rows if r['reviewable'] and r['has_pdf'] and r['has_mineru'] and r['valid_mineru'])
+        valid_paper = sum(1 for r in year_rows if r['reviewable'] and r['has_pdf'] and r['has_mineru'] and r['valid_mineru'] and r['valid_paper'])
+        has_redacted = sum(1 for r in year_rows if r['reviewable'] and r['has_pdf'] and r['has_mineru'] and r['valid_mineru'] and r['valid_paper'] and r['has_redacted'])
+        has_images = sum(1 for r in year_rows if r['reviewable'] and r['has_pdf'] and r['has_mineru'] and r['valid_mineru'] and r['valid_paper'] and r['has_redacted'] and r['has_images'])
+        clean = sum(1 for r in year_rows if r['reviewable'] and r['has_pdf'] and r['has_mineru'] and r['valid_mineru'] and r['valid_paper'] and r['has_redacted'] and r['has_images'] and r['is_clean'])
+
+        # Collect manipulation stats for papers with images
+        for r in year_rows:
+            if r['reviewable'] and r['has_pdf'] and r['has_mineru'] and r['valid_mineru'] and r['valid_paper'] and r['has_redacted'] and r['has_images'] and r['meta']:
+                m = r['meta']
+                if m.get('removed_before_intro_count', 0) > 0:
+                    manipulation_stats[year]['before_intro'] += 1
+                if m.get('removed_footnotes_count', 0) > 0:
+                    manipulation_stats[year]['footnotes'] += 1
+                if m.get('removed_reproducibility_count', 0) > 0:
+                    manipulation_stats[year]['reproducibility'] += 1
+                if m.get('removed_acknowledgments_count', 0) > 0:
+                    manipulation_stats[year]['acknowledgments'] += 1
+                if m.get('removed_github_in_abstract', False):
+                    manipulation_stats[year]['github_abstract'] += 1
+                if m.get('headers_whiteout_count', 0) > 0:
+                    manipulation_stats[year]['headers'] += 1
+                manipulation_stats[year]['total'] += 1
+
+        summary.append({
+            'year': year,
+            'total': total,
+            'reviewable': reviewable,
+            'has_pdf': has_pdf,
+            'has_mineru': has_mineru,
+            'valid_mineru': valid_mineru,
+            'valid_paper': valid_paper,
+            'has_redacted': has_redacted,
+            'has_images': has_images,
+            'clean': clean,
+        })
+
+    # Print table
+    print()
+    print(f"{'Year':<6} {'Total':<7} {'Review':<8} {'HasPDF':<7} {'%':<5} {'MinerU':<7} {'%':<5} {'ValidMD':<8} {'%':<5} {'HasAbsRef':<9} {'%':<5} {'Redacted':<9} {'%':<5} {'Images':<7} {'%':<5} {'Clean':<6} {'%':<5}")
+    print("-" * 135)
+
+    totals = {k: 0 for k in ['total', 'reviewable', 'has_pdf', 'has_mineru', 'valid_mineru', 'valid_paper', 'has_redacted', 'has_images', 'clean']}
+    for r in summary:
+        rev = r['reviewable']
+        pct_pdf = f"{100*r['has_pdf']/rev:.1f}" if rev > 0 else "0"
+        pct_min = f"{100*r['has_mineru']/rev:.1f}" if rev > 0 else "0"
+        pct_val = f"{100*r['valid_mineru']/rev:.1f}" if rev > 0 else "0"
+        pct_pap = f"{100*r['valid_paper']/rev:.1f}" if rev > 0 else "0"
+        pct_red = f"{100*r['has_redacted']/rev:.1f}" if rev > 0 else "0"
+        pct_img = f"{100*r['has_images']/rev:.1f}" if rev > 0 else "0"
+        pct_cln = f"{100*r['clean']/rev:.1f}" if rev > 0 else "0"
+
+        print(f"{r['year']:<6} {r['total']:<7} {r['reviewable']:<8} {r['has_pdf']:<7} {pct_pdf:<5} {r['has_mineru']:<7} {pct_min:<5} {r['valid_mineru']:<8} {pct_val:<5} {r['valid_paper']:<9} {pct_pap:<5} {r['has_redacted']:<9} {pct_red:<5} {r['has_images']:<7} {pct_img:<5} {r['clean']:<6} {pct_cln:<5}")
+
+        for k in totals:
+            totals[k] += r[k]
+
+    print("-" * 135)
+    rev = totals['reviewable']
+    pct_pdf = f"{100*totals['has_pdf']/rev:.1f}" if rev > 0 else "0"
+    pct_min = f"{100*totals['has_mineru']/rev:.1f}" if rev > 0 else "0"
+    pct_val = f"{100*totals['valid_mineru']/rev:.1f}" if rev > 0 else "0"
+    pct_pap = f"{100*totals['valid_paper']/rev:.1f}" if rev > 0 else "0"
+    pct_red = f"{100*totals['has_redacted']/rev:.1f}" if rev > 0 else "0"
+    pct_img = f"{100*totals['has_images']/rev:.1f}" if rev > 0 else "0"
+    pct_cln = f"{100*totals['clean']/rev:.1f}" if rev > 0 else "0"
+
+    print(f"{'Total':<6} {totals['total']:<7} {totals['reviewable']:<8} {totals['has_pdf']:<7} {pct_pdf:<5} {totals['has_mineru']:<7} {pct_min:<5} {totals['valid_mineru']:<8} {pct_val:<5} {totals['valid_paper']:<9} {pct_pap:<5} {totals['has_redacted']:<9} {pct_red:<5} {totals['has_images']:<7} {pct_img:<5} {totals['clean']:<6} {pct_cln:<5}")
+
+    # Print drop examples if requested
+    if show_drops > 0:
+        print(f"\n=== Papers dropped from ValidMD -> HasAbsRef (up to {show_drops} per year) ===")
+        for year in sorted(drops.keys()):
+            year_drops = drops[year]
+            print(f"\n{year} ({len(year_drops)} total drops):")
+            for item in year_drops[:show_drops]:
+                print(f"  {item['id']}: {item['reason']}")
+                print(f"    md: {item['md_path']}")
+
+    # Print manipulation stats table (count of papers with each manipulation, from has_images subset)
+    print(f"\n=== Manipulation Stats (papers with valid images) ===")
+    print(f"{'Year':<6} {'Total':<7} {'BeforeIntro':<12} {'Footnotes':<10} {'Repro':<8} {'Ack':<8} {'GitHub':<8} {'Headers':<8}")
+    print("-" * 80)
+
+    manip_totals = defaultdict(int)
+    for year in years:
+        if year not in manipulation_stats:
+            continue
+        s = manipulation_stats[year]
+        print(f"{year:<6} {s['total']:<7} {s['before_intro']:<12} {s['footnotes']:<10} {s['reproducibility']:<8} {s['acknowledgments']:<8} {s['github_abstract']:<8} {s['headers']:<8}")
+        for k in ['total', 'before_intro', 'footnotes', 'reproducibility', 'acknowledgments', 'github_abstract', 'headers']:
+            manip_totals[k] += s[k]
+
+    print("-" * 80)
+    print(f"{'Total':<6} {manip_totals['total']:<7} {manip_totals['before_intro']:<12} {manip_totals['footnotes']:<10} {manip_totals['reproducibility']:<8} {manip_totals['acknowledgments']:<8} {manip_totals['github_abstract']:<8} {manip_totals['headers']:<8}")
+
+
 if __name__ == "__main__":
-    print("=== Coverage Table (Review = Total - Withdrawn - Desk Reject) ===")
+    print("=== Pipeline Statistics ===")
+    get_pipeline_stats()
+    print("\n=== Coverage Table (Review = Total - Withdrawn - Desk Reject) ===")
     get_pdf_coverage_table()
     print("\n=== Complete Papers (PDF + MD + Reviewable) ===")
     get_complete_papers_table()

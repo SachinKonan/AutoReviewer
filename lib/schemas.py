@@ -553,3 +553,36 @@ def extract_decision_from_submission(year: int, submission) -> Optional[str]:
             return _get_value(content.get('decision'))
 
     return None
+
+
+# =============================================================================
+# LLM-EXTRACTED UNIVERSAL SCHEMAS
+# =============================================================================
+# These schemas define the normalized output from LLM extraction of reviews.
+# Used by lib/normalize_reviews.py to standardize year-specific formats.
+
+class Source(BaseModel):
+    """Reference to another paper mentioned in a review."""
+    ref: str = Field(..., description="Link or title of referenced paper")
+    within: str = Field(..., description="Which field: 'summary', 'strengths', 'weaknesses', 'questions'")
+
+
+class LLMUniversalReview(BaseModel):
+    """LLM-extracted normalized review (unified across all years)."""
+    summary: str = Field(..., description="Main summary/points of the review")
+    strengths: str = Field(..., description="Paper strengths identified by reviewer")
+    weaknesses: str = Field(..., description="Paper weaknesses identified by reviewer")
+    questions: str = Field(..., description="Questions for authors")
+    sources: List[Source] = Field(default_factory=list, description="Papers/sources mentioned in the review")
+    technical_novelty_contribution: Optional[str] = Field(None, description="Technical novelty assessment (if mentioned)")
+    empirical_novelty_contribution: Optional[str] = Field(None, description="Empirical contribution assessment (if mentioned)")
+    presentation: Optional[str] = Field(None, description="Presentation quality assessment (if mentioned)")
+
+
+class LLMUniversalMetaReview(BaseModel):
+    """LLM-extracted normalized meta-review (unified across all years)."""
+    summary: str = Field(..., description="Main summary/assessment from AC")
+    strengths: str = Field(..., description="Identified strengths")
+    weaknesses: str = Field(..., description="Identified weaknesses")
+    why_not_higher: Optional[str] = Field(None, description="Justification for not higher score (if present)")
+    why_not_lower: Optional[str] = Field(None, description="Justification for not lower score (if present)")

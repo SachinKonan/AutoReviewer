@@ -23,27 +23,30 @@ GITHUB_PATTERN = re.compile(r'github', re.IGNORECASE)
 ANON_PATTERN = re.compile(r'anonymous', re.IGNORECASE)
 
 def classify_decision(decision: str) -> str:
-    """Classify decision as 'Accept', 'Reject', or 'Other'."""
+    """Classify decision as 'Accept', 'Reject', or 'Undecided'."""
     if decision.startswith('Accept'):
         return 'Accept'
     elif decision == 'Reject':
         return 'Reject'
     else:
-        return 'Other'
+        return 'Undecided'
 
 
-def build_mineru_index(mineru_dir: Path) -> tuple[dict[str, Path], dict[str, Path]]:
+def build_mineru_index(mineru_dir: Path) -> tuple[dict[str, Path], dict[str, Path], dict[str, Path]]:
     """Build index mapping folder name -> markdown file path across all batches.
 
     Returns:
-        (index, fixed_2020_index): Main index and separate index for batch_2020_fixed.
-        Both map folder_name -> md_path. Use prefix matching for lookups.
+        (index, fixed_index, fixed_pt2_index):
+        - index: all batches (batch_00 to batch_18)
+        - fixed_index: batch_2020_fixed only
+        - fixed_pt2_index: batch_2020_fixed_pt2 only (highest priority for 2020)
     """
     index = {}
-    fixed_2020_index = {}
+    fixed_index = {}
+    fixed_pt2_index = {}
 
     for batch_dir in sorted(mineru_dir.glob("batch_*")):
-        is_fixed_2020 = batch_dir.name == "batch_2020_fixed"
+        batch_name = batch_dir.name
         # Use scandir for efficiency on NFS - caches is_dir() result
         with os.scandir(batch_dir) as entries:
             for entry in entries:
@@ -53,10 +56,20 @@ def build_mineru_index(mineru_dir: Path) -> tuple[dict[str, Path], dict[str, Pat
                     md_path = Path(entry.path) / "vlm" / f"{folder_name}.md"
                     if md_path.exists():
                         index[folder_name] = md_path
-                        if is_fixed_2020:
-                            fixed_2020_index[folder_name] = md_path
+                        if batch_name == "batch_2020_fixed":
+                            fixed_index[folder_name] = md_path
+                        elif batch_name == "batch_2020_fixed_pt2":
+                            fixed_pt2_index[folder_name] = md_path
 
-    return index, fixed_2020_index
+    return index, fixed_index, fixed_pt2_index
+
+
+def _prefix_lookup(submission_id: str, sorted_keys: list[str], index: dict[str, Path]) -> Path | None:
+    """Binary search for submission_id prefix in sorted keys."""
+    i = bisect.bisect_left(sorted_keys, submission_id)
+    if i < len(sorted_keys) and sorted_keys[i].startswith(submission_id):
+        return index[sorted_keys[i]]
+    return None
 
 
 def find_mineru_by_prefix(
@@ -64,25 +77,32 @@ def find_mineru_by_prefix(
     sorted_keys: list[str],
     index: dict[str, Path],
     year: int = None,
-    fixed_2020_keys: list[str] = None,
-    fixed_2020_index: dict[str, Path] = None,
+    fixed_keys: list[str] = None,
+    fixed_index: dict[str, Path] = None,
+    fixed_pt2_keys: list[str] = None,
+    fixed_pt2_index: dict[str, Path] = None,
 ) -> Path | None:
     """Find MinerU markdown by submission ID prefix using binary search.
 
-    For year=2020, checks fixed_2020_index first (if provided) to prefer
-    batch_2020_fixed over other batches.
+    For year=2020, checks indices in priority order:
+    1. fixed_pt2_index (batch_2020_fixed_pt2) - highest priority
+    2. fixed_index (batch_2020_fixed)
+    3. main index (all batches)
     """
-    # For 2020 submissions, check fixed index first
-    if year == 2020 and fixed_2020_keys and fixed_2020_index:
-        i = bisect.bisect_left(fixed_2020_keys, submission_id)
-        if i < len(fixed_2020_keys) and fixed_2020_keys[i].startswith(submission_id):
-            return fixed_2020_index[fixed_2020_keys[i]]
+    if year == 2020:
+        # Check pt2 first (highest priority)
+        if fixed_pt2_keys and fixed_pt2_index:
+            result = _prefix_lookup(submission_id, fixed_pt2_keys, fixed_pt2_index)
+            if result:
+                return result
+        # Check fixed next
+        if fixed_keys and fixed_index:
+            result = _prefix_lookup(submission_id, fixed_keys, fixed_index)
+            if result:
+                return result
 
     # Fall back to main index
-    i = bisect.bisect_left(sorted_keys, submission_id)
-    if i < len(sorted_keys) and sorted_keys[i].startswith(submission_id):
-        return index[sorted_keys[i]]
-    return None
+    return _prefix_lookup(submission_id, sorted_keys, index)
 
 
 def extract_abstract(md_text: str) -> str:
@@ -147,15 +167,17 @@ def analyze_stats(data_dir: Path = Path("data/full_run")):
     pdf_index = build_pdf_file_index(pdf_dir, DEFAULT_YEARS)
 
     print("Building MinerU index...")
-    mineru_index, fixed_2020_index = build_mineru_index(mineru_dir)
+    mineru_index, fixed_index, fixed_pt2_index = build_mineru_index(mineru_dir)
     mineru_keys = sorted(mineru_index.keys())
-    fixed_2020_keys = sorted(fixed_2020_index.keys())
+    fixed_keys = sorted(fixed_index.keys())
+    fixed_pt2_keys = sorted(fixed_pt2_index.keys())
     print(f"  Found {len(mineru_index)} MinerU conversions")
-    print(f"  Found {len(fixed_2020_index)} in batch_2020_fixed (preferred for 2020)")
+    print(f"  Found {len(fixed_index)} in batch_2020_fixed")
+    print(f"  Found {len(fixed_pt2_index)} in batch_2020_fixed_pt2 (highest priority for 2020)")
 
     # Subset keys for counting
     subset_keys = ['1', '2', '3', '12', '13', '23', '123', 'none']
-    decision_types = ['Accept', 'Reject']
+    decision_types = ['Accept', 'Reject', 'Undecided']
 
     # Results: year -> decision_type -> counts
     results = []
@@ -183,8 +205,6 @@ def analyze_stats(data_dir: Path = Path("data/full_run")):
 
         for s in non_wd:
             dec_type = classify_decision(s.decision)
-            if dec_type not in decision_types:
-                continue  # Skip 'Other' (Unknown decisions)
 
             year_counts[dec_type]['count'] += 1
 
@@ -196,7 +216,9 @@ def analyze_stats(data_dir: Path = Path("data/full_run")):
             # Check MinerU + analyze (prefer batch_2020_fixed for 2020)
             md_path = find_mineru_by_prefix(
                 s.id, mineru_keys, mineru_index,
-                year=year, fixed_2020_keys=fixed_2020_keys, fixed_2020_index=fixed_2020_index
+                year=year,
+                fixed_keys=fixed_keys, fixed_index=fixed_index,
+                fixed_pt2_keys=fixed_pt2_keys, fixed_pt2_index=fixed_pt2_index,
             )
             if md_path:
                 year_counts[dec_type]['mineru'] += 1
@@ -295,7 +317,7 @@ def analyze_stats(data_dir: Path = Path("data/full_run")):
 
     # Summary
     print("\nSummary:")
-    for dt in ['Accept', 'Reject', 'All']:
+    for dt in ['Accept', 'Reject', 'Undecided', 'All']:
         t = totals[dt]
         if t['count'] > 0:
             print(f"\n  {dt}:")

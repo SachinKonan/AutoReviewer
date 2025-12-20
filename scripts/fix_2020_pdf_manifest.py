@@ -24,8 +24,8 @@ from pathlib import Path
 import openreview
 
 
-# Cutoff: day after final_decision_date (2019-12-19)
-CUTOFF_DATE = datetime(2019, 12, 20)
+# Cutoff: Dec 17 to include only through Dec 16 (some camera-readys posted Dec 17-19)
+CUTOFF_DATE = datetime(2019, 12, 17)
 
 
 def extract_pdf_path_fixed(submission, revisions: list) -> tuple:
@@ -269,7 +269,7 @@ def main():
 
     print("=" * 80)
     print("FIX ICLR 2020 PDF MANIFEST")
-    print(f"Cutoff date: {CUTOFF_DATE} (final_decision was 2019-12-19)")
+    print(f"Cutoff date: {CUTOFF_DATE} (include through Dec 16 only)")
     print(f"Mode: {'DRY RUN' if args.dry_run else 'APPLY'}")
     print("=" * 80)
 
