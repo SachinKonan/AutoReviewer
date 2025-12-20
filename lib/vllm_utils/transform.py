@@ -20,20 +20,28 @@ class VLLMTransformer(ABC):
         - preprocess(row): Transform input row to vLLM format
         - postprocess(row): Transform vLLM output to final format
 
+    Sampling parameters are fixed (temp=0.7, top_p=0.8, top_k=20, min_p=0).
+    Only `n` (number of completions) is user-configurable.
+
     Usage:
         class MyTransformer(VLLMTransformer):
             def preprocess(self, row):
                 return {
                     "messages": [{"role": "user", "content": row["text"]}],
-                    "sampling_params": {"temperature": 0, "max_tokens": 512}
                 }
 
             def postprocess(self, row):
                 return {"output": row["generated_text"]}
 
-        transformer = MyTransformer(df, model_name="meta-llama/Llama-3.1-8B-Instruct")
+        transformer = MyTransformer(df, model_name="meta-llama/Llama-3.1-8B-Instruct", n=3)
         result_df = transformer.transform()
     """
+
+    # Fixed sampling parameters (not user-configurable)
+    TEMPERATURE = 0.7
+    TOP_P = 0.8
+    TOP_K = 20
+    MIN_P = 0.0
 
     def __init__(
         self,
@@ -42,11 +50,10 @@ class VLLMTransformer(ABC):
         tensor_parallel: int = 1,
         concurrency: int = 1,
         batch_size: int = 32,
-        max_model_len: int = 4096,
+        max_model_len: int = 8192,
         ray_address: Optional[str] = None,
-        temperature: float = 0.0,
-        max_tokens: int = 512,
-        n: int = 1,
+        max_tokens: int = 4096,
+        n: int = 2,
         guided_json: Optional[dict] = None,
     ):
         """Initialize the transformer.
@@ -59,10 +66,12 @@ class VLLMTransformer(ABC):
             batch_size: Batch size for inference
             max_model_len: Maximum context length
             ray_address: Ray cluster address (None for auto-detect)
-            temperature: Sampling temperature
             max_tokens: Maximum tokens to generate per request
             n: Number of completions to generate per request
             guided_json: JSON schema for structured output (optional)
+
+        Note:
+            Sampling parameters are fixed: temp=0.7, top_p=0.8, top_k=20, min_p=0
         """
         self.df = df
         self.model_name = model_name
@@ -71,7 +80,6 @@ class VLLMTransformer(ABC):
         self.batch_size = batch_size
         self.max_model_len = max_model_len
         self.ray_address = ray_address
-        self.temperature = temperature
         self.max_tokens = max_tokens
         self.n = n
         self.guided_json = guided_json
@@ -130,8 +138,7 @@ class VLLMTransformer(ABC):
             print(f"Connecting to Ray cluster at {self.ray_address}")
             ray.init(address=self.ray_address, ignore_reinit_error=True, runtime_env=runtime_env)
         else:
-            print("Auto-detecting Ray cluster...")
-            ray.init(address="auto", ignore_reinit_error=True, runtime_env=runtime_env)
+            raise ValueError("ray_address is required - start Ray with 'ray start --head' and pass --ray-address")
 
     def _build_processor(self):
         """Build the vLLM processor with config."""
@@ -146,9 +153,12 @@ class VLLMTransformer(ABC):
             }
         )
 
-        # Build sampling params dict
+        # Build sampling params dict with fixed values
         sampling_params_base = {
-            "temperature": self.temperature,
+            "temperature": self.TEMPERATURE,
+            "top_p": self.TOP_P,
+            "top_k": self.TOP_K,
+            "min_p": self.MIN_P,
             "max_tokens": self.max_tokens,
             "n": self.n,
         }

@@ -10,6 +10,7 @@ from pathlib import Path
 from tqdm import tqdm
 
 from lib.normalize import ABSTRACT_PATTERN, REFERENCES_PATTERN
+from lib.schemas import extract_reviews_from_submission, extract_meta_review_from_submission
 
 
 def has_github_link(text: str) -> bool:
@@ -807,7 +808,17 @@ def get_pipeline_stats(
     normalized_index = build_normalized_index(data_dir / "normalized")
     print(f"  Normalized index: {len(normalized_index)} submissions")
 
-    # 4. Iterate through submissions and collect stats
+    # 4. Build raw notes index for review counting
+    notes_by_id = {}
+    for year in years:
+        pkl_path = data_dir / f"get_all_notes_{year}.pickle"
+        if pkl_path.exists():
+            notes = load_raw_notes(pkl_path)
+            for note in notes:
+                notes_by_id[note.id] = (note, year)
+    print(f"  Notes index: {len(notes_by_id)} submissions")
+
+    # 5. Iterate through submissions and collect stats
     rows = []
     drops = defaultdict(list)  # Track drops from ValidMD -> HasAbsRef per year
 
@@ -875,16 +886,35 @@ def get_pipeline_stats(
                 # Store meta for manipulation stats
                 paper_meta = meta
 
-                # Track drop reason if valid_mineru but not valid_paper
-                if valid_mineru and not valid_paper and is_reviewable:
-                    reasons = []
-                    if page_end == 0:
-                        reasons.append('page_end=0')
-                    if not has_abs:
-                        reasons.append('no_abstract')
-                    if not has_refs:
-                        reasons.append('no_references')
-                    drop_reason = ', '.join(reasons) if reasons else 'unknown'
+            # Check for valid reviews (at least 1 review + meta) - only for papers with images
+            valid_reviews = False
+            num_reviews = 0
+            review_has_meta = False
+
+            if s.id in notes_by_id:
+                note, note_year = notes_by_id[s.id]
+                try:
+                    reviews = extract_reviews_from_submission(note_year, note)
+                    num_reviews = len(reviews)
+                except Exception:
+                    pass
+                try:
+                    meta_review = extract_meta_review_from_submission(note_year, note)
+                    review_has_meta = meta_review is not None
+                except Exception:
+                    pass
+                valid_reviews = num_reviews >= 1 and review_has_meta
+
+            # Track drop reason if valid_mineru but not valid_paper
+            if valid_mineru and not valid_paper and is_reviewable:
+                reasons = []
+                if page_end == 0:
+                    reasons.append('page_end=0')
+                if not has_abs:
+                    reasons.append('no_abstract')
+                if not has_refs:
+                    reasons.append('no_references')
+                drop_reason = ', '.join(reasons) if reasons else 'unknown'
 
             # Collect drop examples
             if drop_reason and mineru_md_path:
@@ -905,6 +935,9 @@ def get_pipeline_stats(
                 'has_redacted': has_redacted,
                 'has_images': has_images,
                 'is_clean': is_clean,
+                'valid_reviews': valid_reviews,
+                'num_reviews': num_reviews,
+                'has_meta_review': review_has_meta,
                 'meta': paper_meta,  # For manipulation table
             })
 
@@ -927,6 +960,11 @@ def get_pipeline_stats(
         has_redacted = sum(1 for r in year_rows if r['reviewable'] and r['has_pdf'] and r['has_mineru'] and r['valid_mineru'] and r['valid_paper'] and r['has_redacted'])
         has_images = sum(1 for r in year_rows if r['reviewable'] and r['has_pdf'] and r['has_mineru'] and r['valid_mineru'] and r['valid_paper'] and r['has_redacted'] and r['has_images'])
         clean = sum(1 for r in year_rows if r['reviewable'] and r['has_pdf'] and r['has_mineru'] and r['valid_mineru'] and r['valid_paper'] and r['has_redacted'] and r['has_images'] and r['is_clean'])
+        valid_revs = sum(1 for r in year_rows if r['reviewable'] and r['has_pdf'] and r['has_mineru'] and r['valid_mineru'] and r['valid_paper'] and r['has_redacted'] and r['has_images'] and r['valid_reviews'])
+
+        # Count total reviews and meta-reviews for papers with images
+        total_reviews_year = sum(r['num_reviews'] for r in year_rows if r['reviewable'] and r['has_pdf'] and r['has_mineru'] and r['valid_mineru'] and r['valid_paper'] and r['has_redacted'] and r['has_images'])
+        total_metas_year = sum(1 for r in year_rows if r['reviewable'] and r['has_pdf'] and r['has_mineru'] and r['valid_mineru'] and r['valid_paper'] and r['has_redacted'] and r['has_images'] and r['has_meta_review'])
 
         # Collect manipulation stats for papers with images
         for r in year_rows:
@@ -957,14 +995,17 @@ def get_pipeline_stats(
             'has_redacted': has_redacted,
             'has_images': has_images,
             'clean': clean,
+            'valid_revs': valid_revs,
+            'total_reviews': total_reviews_year,
+            'total_metas': total_metas_year,
         })
 
     # Print table
     print()
-    print(f"{'Year':<6} {'Total':<7} {'Review':<8} {'HasPDF':<7} {'%':<5} {'MinerU':<7} {'%':<5} {'ValidMD':<8} {'%':<5} {'HasAbsRef':<9} {'%':<5} {'Redacted':<9} {'%':<5} {'Images':<7} {'%':<5} {'Clean':<6} {'%':<5}")
-    print("-" * 135)
+    print(f"{'Year':<6} {'Total':<7} {'Review':<8} {'HasPDF':<7} {'%':<5} {'MinerU':<7} {'%':<5} {'ValidMD':<8} {'%':<5} {'HasAbsRef':<9} {'%':<5} {'Redacted':<9} {'%':<5} {'Images':<7} {'%':<5} {'Clean':<6} {'%':<5} {'VldRev':<6} {'%':<5}")
+    print("-" * 150)
 
-    totals = {k: 0 for k in ['total', 'reviewable', 'has_pdf', 'has_mineru', 'valid_mineru', 'valid_paper', 'has_redacted', 'has_images', 'clean']}
+    totals = {k: 0 for k in ['total', 'reviewable', 'has_pdf', 'has_mineru', 'valid_mineru', 'valid_paper', 'has_redacted', 'has_images', 'clean', 'valid_revs', 'total_reviews', 'total_metas']}
     for r in summary:
         rev = r['reviewable']
         pct_pdf = f"{100*r['has_pdf']/rev:.1f}" if rev > 0 else "0"
@@ -974,13 +1015,14 @@ def get_pipeline_stats(
         pct_red = f"{100*r['has_redacted']/rev:.1f}" if rev > 0 else "0"
         pct_img = f"{100*r['has_images']/rev:.1f}" if rev > 0 else "0"
         pct_cln = f"{100*r['clean']/rev:.1f}" if rev > 0 else "0"
+        pct_vr = f"{100*r['valid_revs']/rev:.1f}" if rev > 0 else "0"
 
-        print(f"{r['year']:<6} {r['total']:<7} {r['reviewable']:<8} {r['has_pdf']:<7} {pct_pdf:<5} {r['has_mineru']:<7} {pct_min:<5} {r['valid_mineru']:<8} {pct_val:<5} {r['valid_paper']:<9} {pct_pap:<5} {r['has_redacted']:<9} {pct_red:<5} {r['has_images']:<7} {pct_img:<5} {r['clean']:<6} {pct_cln:<5}")
+        print(f"{r['year']:<6} {r['total']:<7} {r['reviewable']:<8} {r['has_pdf']:<7} {pct_pdf:<5} {r['has_mineru']:<7} {pct_min:<5} {r['valid_mineru']:<8} {pct_val:<5} {r['valid_paper']:<9} {pct_pap:<5} {r['has_redacted']:<9} {pct_red:<5} {r['has_images']:<7} {pct_img:<5} {r['clean']:<6} {pct_cln:<5} {r['valid_revs']:<6} {pct_vr:<5}")
 
         for k in totals:
             totals[k] += r[k]
 
-    print("-" * 135)
+    print("-" * 150)
     rev = totals['reviewable']
     pct_pdf = f"{100*totals['has_pdf']/rev:.1f}" if rev > 0 else "0"
     pct_min = f"{100*totals['has_mineru']/rev:.1f}" if rev > 0 else "0"
@@ -989,8 +1031,18 @@ def get_pipeline_stats(
     pct_red = f"{100*totals['has_redacted']/rev:.1f}" if rev > 0 else "0"
     pct_img = f"{100*totals['has_images']/rev:.1f}" if rev > 0 else "0"
     pct_cln = f"{100*totals['clean']/rev:.1f}" if rev > 0 else "0"
+    pct_vr = f"{100*totals['valid_revs']/rev:.1f}" if rev > 0 else "0"
 
-    print(f"{'Total':<6} {totals['total']:<7} {totals['reviewable']:<8} {totals['has_pdf']:<7} {pct_pdf:<5} {totals['has_mineru']:<7} {pct_min:<5} {totals['valid_mineru']:<8} {pct_val:<5} {totals['valid_paper']:<9} {pct_pap:<5} {totals['has_redacted']:<9} {pct_red:<5} {totals['has_images']:<7} {pct_img:<5} {totals['clean']:<6} {pct_cln:<5}")
+    print(f"{'Total':<6} {totals['total']:<7} {totals['reviewable']:<8} {totals['has_pdf']:<7} {pct_pdf:<5} {totals['has_mineru']:<7} {pct_min:<5} {totals['valid_mineru']:<8} {pct_val:<5} {totals['valid_paper']:<9} {pct_pap:<5} {totals['has_redacted']:<9} {pct_red:<5} {totals['has_images']:<7} {pct_img:<5} {totals['clean']:<6} {pct_cln:<5} {totals['valid_revs']:<6} {pct_vr:<5}")
+
+    # Review statistics summary
+    print(f"\n=== Review Statistics (papers with valid images) ===")
+    print(f"Papers with images: {totals['has_images']:,}")
+    print(f"Papers with valid reviews (>=1 review + meta): {totals['valid_revs']:,}")
+    print(f"Total reviews: {totals['total_reviews']:,}")
+    print(f"Total meta-reviews: {totals['total_metas']:,}")
+    avg_reviews = totals['total_reviews'] / totals['has_images'] if totals['has_images'] > 0 else 0
+    print(f"Average reviews per paper: {avg_reviews:.2f}")
 
     # Print drop examples if requested
     if show_drops > 0:

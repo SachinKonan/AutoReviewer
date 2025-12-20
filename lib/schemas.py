@@ -9,9 +9,11 @@ Schema Evolution:
 - 2024+: Meta-review is SEPARATE (/-/Meta_Review invitation)
 """
 
-from pydantic import BaseModel, Field, field_validator
-from typing import Optional, List, Any, Dict, Type, Union
+import json
 import re
+from typing import Optional, List, Any, Dict, Type, Union, get_origin, get_args
+
+from pydantic import BaseModel, Field, field_validator
 
 
 def _parse_score_prefix(value: Union[str, int]) -> int:
@@ -572,7 +574,7 @@ class LLMUniversalReview(BaseModel):
     summary: str = Field(..., description="Main summary/points of the review")
     strengths: str = Field(..., description="Paper strengths identified by reviewer")
     weaknesses: str = Field(..., description="Paper weaknesses identified by reviewer")
-    questions: str = Field(..., description="Questions for authors")
+    questions: List[str] = Field(default_factory=list, description="Questions for authors")
     sources: List[Source] = Field(default_factory=list, description="Papers/sources mentioned in the review")
     technical_novelty_contribution: Optional[str] = Field(None, description="Technical novelty assessment (if mentioned)")
     empirical_novelty_contribution: Optional[str] = Field(None, description="Empirical contribution assessment (if mentioned)")
@@ -586,3 +588,172 @@ class LLMUniversalMetaReview(BaseModel):
     weaknesses: str = Field(..., description="Identified weaknesses")
     why_not_higher: Optional[str] = Field(None, description="Justification for not higher score (if present)")
     why_not_lower: Optional[str] = Field(None, description="Justification for not lower score (if present)")
+
+
+# =============================================================================
+# SCHEMA FORMATTING FOR PROMPTS
+# =============================================================================
+
+def format_type_hint(annotation) -> str:
+    """Convert a type annotation to a human-readable string."""
+    origin = get_origin(annotation)
+
+    if origin is None:
+        # Simple type (str, int, etc.) or Pydantic model
+        if hasattr(annotation, '__name__'):
+            return annotation.__name__
+        return str(annotation)
+
+    args = get_args(annotation)
+
+    # Handle Optional[X] (Union[X, None])
+    if origin is type(None) or str(origin) == 'typing.Union':
+        non_none_args = [a for a in args if a is not type(None)]
+        if len(non_none_args) == 1:
+            return f"{format_type_hint(non_none_args[0])} or null"
+        return " | ".join(format_type_hint(a) for a in non_none_args)
+
+    # Handle List[X]
+    if origin is list:
+        if args:
+            return f"list of {format_type_hint(args[0])}"
+        return "list"
+
+    return str(annotation)
+
+
+def format_schema_for_prompt(model: Type[BaseModel], indent: int = 0) -> str:
+    """Generate a human-readable schema description from a Pydantic model.
+
+    Recursively handles nested models and lists.
+
+    Args:
+        model: Pydantic model class
+        indent: Current indentation level
+
+    Returns:
+        Human-readable schema string
+    """
+    lines = []
+    prefix = "  " * indent
+
+    for field_name, field_info in model.model_fields.items():
+        annotation = field_info.annotation
+        description = field_info.description or ""
+        is_required = field_info.is_required()
+
+        # Get the type string
+        type_str = format_type_hint(annotation)
+
+        # Build the field line
+        req_str = "required" if is_required else "optional"
+        line = f"{prefix}- {field_name}: {type_str} ({req_str})"
+        if description:
+            line += f" - {description}"
+        lines.append(line)
+
+        # Check if this is a nested Pydantic model or List of models
+        origin = get_origin(annotation)
+        inner_type = None
+
+        if origin is list:
+            args = get_args(annotation)
+            if args and hasattr(args[0], 'model_fields'):
+                inner_type = args[0]
+        elif hasattr(annotation, 'model_fields'):
+            inner_type = annotation
+
+        # Recursively format nested models
+        if inner_type is not None:
+            lines.append(f"{prefix}  Fields for {inner_type.__name__}:")
+            nested = format_schema_for_prompt(inner_type, indent + 2)
+            lines.append(nested)
+
+    return "\n".join(lines)
+
+
+def generate_example_json(model: Type[BaseModel]) -> str:
+    """Generate an example JSON structure from a Pydantic model."""
+    example = {}
+
+    for field_name, field_info in model.model_fields.items():
+        annotation = field_info.annotation
+        is_required = field_info.is_required()
+
+        origin = get_origin(annotation)
+        args = get_args(annotation)
+
+        # Handle Optional types
+        if origin is type(None) or str(origin) == 'typing.Union':
+            non_none_args = [a for a in args if a is not type(None)]
+            if non_none_args:
+                annotation = non_none_args[0]
+                origin = get_origin(annotation)
+                args = get_args(annotation)
+
+        # Generate example value based on type
+        if origin is list:
+            if args and hasattr(args[0], 'model_fields'):
+                # List of nested models - show structure
+                nested_example = {}
+                for nested_name in args[0].model_fields:
+                    nested_example[nested_name] = "..."
+                example[field_name] = [nested_example]
+            else:
+                # List of simple types (e.g., List[str])
+                example[field_name] = ["..."]
+        elif hasattr(annotation, 'model_fields'):
+            # Nested model
+            nested_example = {}
+            for nested_name in annotation.model_fields:
+                nested_example[nested_name] = "..."
+            example[field_name] = nested_example
+        elif annotation is str or (hasattr(annotation, '__name__') and annotation.__name__ == 'str'):
+            example[field_name] = "..."
+        elif annotation is int or (hasattr(annotation, '__name__') and annotation.__name__ == 'int'):
+            example[field_name] = 0
+        elif not is_required:
+            example[field_name] = None
+        else:
+            example[field_name] = "..."
+
+    return json.dumps(example, indent=2)
+
+
+# Cache the formatted schemas
+_REVIEW_SCHEMA_STR = None
+_META_SCHEMA_STR = None
+_REVIEW_EXAMPLE = None
+_META_EXAMPLE = None
+
+
+def get_review_schema_str() -> str:
+    """Get cached review schema string."""
+    global _REVIEW_SCHEMA_STR
+    if _REVIEW_SCHEMA_STR is None:
+        _REVIEW_SCHEMA_STR = format_schema_for_prompt(LLMUniversalReview)
+    return _REVIEW_SCHEMA_STR
+
+
+def get_meta_schema_str() -> str:
+    """Get cached meta-review schema string."""
+    global _META_SCHEMA_STR
+    if _META_SCHEMA_STR is None:
+        _META_SCHEMA_STR = format_schema_for_prompt(LLMUniversalMetaReview)
+    return _META_SCHEMA_STR
+
+
+def get_review_example() -> str:
+    """Get cached review example JSON."""
+    global _REVIEW_EXAMPLE
+    if _REVIEW_EXAMPLE is None:
+        _REVIEW_EXAMPLE = generate_example_json(LLMUniversalReview)
+    return _REVIEW_EXAMPLE
+
+
+def get_meta_example() -> str:
+    """Get cached meta-review example JSON."""
+    global _META_EXAMPLE
+    if _META_EXAMPLE is None:
+        _META_EXAMPLE = generate_example_json(LLMUniversalMetaReview)
+    return _META_EXAMPLE

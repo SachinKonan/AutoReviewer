@@ -19,7 +19,7 @@ import os
 import pickle
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Type
 
 import pandas as pd
 from pydantic import BaseModel
@@ -32,8 +32,12 @@ from lib.schemas import (
     LLMUniversalMetaReview,
     extract_reviews_from_submission,
     extract_meta_review_from_submission,
+    get_review_schema_str,
+    get_meta_schema_str,
+    get_review_example,
+    get_meta_example,
 )
-from lib.utils import build_normalized_index, EXCLUDED_DECISIONS, DEFAULT_YEARS
+from lib.utils import build_normalized_index, load_raw_notes, EXCLUDED_DECISIONS, DEFAULT_YEARS
 from ray.data.llm import vLLMEngineProcessorConfig, build_llm_processor
 from lib.vllm_utils.transform import VLLMTransformer
 
@@ -42,34 +46,40 @@ from lib.vllm_utils.transform import VLLMTransformer
 # PROMPT TEMPLATES
 # =============================================================================
 
-REVIEW_PROMPT_TEMPLATE = """Extract structured information from this ICLR review.
+REVIEW_PROMPT_TEMPLATE = """Extract and normalize this ICLR review into a structured JSON format.
 
 Original Review:
 {review_json}
 
-Output JSON matching this schema:
-{schema}
+Output a JSON object with these fields:
+{schema_fields}
 
-Output only valid JSON:"""
+Example output format:
+{example_json}
+
+JSON:"""
 
 
-META_REVIEW_PROMPT_TEMPLATE = """Extract structured information from this ICLR meta-review.
+META_REVIEW_PROMPT_TEMPLATE = """Extract and normalize this ICLR meta-review into a structured JSON format.
 
 Original Meta-Review:
 {meta_json}
 
-Output JSON matching this schema:
-{schema}
+Output a JSON object with these fields:
+{schema_fields}
 
-Output only valid JSON:"""
+Example output format:
+{example_json}
+
+JSON:"""
 
 
 # =============================================================================
 # DATA LOADING
 # =============================================================================
 
-def load_raw_notes(data_dir: Path, years: List[int]) -> Dict[str, Any]:
-    """Load raw OpenReview notes from pickle files.
+def load_all_raw_notes(data_dir: Path, years: List[int]) -> Dict[str, Any]:
+    """Load raw OpenReview notes from pickle files for multiple years.
 
     Returns:
         Dict mapping submission_id -> (note, year)
@@ -145,9 +155,11 @@ def build_review_prompts(
     """
     prompts = []
 
-    # Get schemas as JSON strings
-    review_schema = json.dumps(LLMUniversalReview.model_json_schema(), indent=2)
-    meta_schema = json.dumps(LLMUniversalMetaReview.model_json_schema(), indent=2)
+    # Get cached schema strings
+    review_schema_str = get_review_schema_str()
+    review_example = get_review_example()
+    meta_schema_str = get_meta_schema_str()
+    meta_example = get_meta_example()
 
     # Extract reviews using schema parser
     try:
@@ -164,7 +176,11 @@ def build_review_prompts(
     # Build prompts for reviews
     for idx, review in enumerate(reviews):
         review_json = review.model_dump_json(indent=2)
-        prompt = REVIEW_PROMPT_TEMPLATE.format(review_json=review_json, schema=review_schema)
+        prompt = REVIEW_PROMPT_TEMPLATE.format(
+            review_json=review_json,
+            schema_fields=review_schema_str,
+            example_json=review_example
+        )
 
         prompts.append({
             'submission_id': submission_id,
@@ -179,7 +195,11 @@ def build_review_prompts(
     # Build prompt for meta-review
     if meta is not None:
         meta_json = meta.model_dump_json(indent=2)
-        prompt = META_REVIEW_PROMPT_TEMPLATE.format(meta_json=meta_json, schema=meta_schema)
+        prompt = META_REVIEW_PROMPT_TEMPLATE.format(
+            meta_json=meta_json,
+            schema_fields=meta_schema_str,
+            example_json=meta_example
+        )
 
         prompts.append({
             'submission_id': submission_id,
@@ -236,7 +256,18 @@ def extract_first_valid(
             continue
 
         try:
+            # First try direct parsing
             return schema.model_validate_json(json_str)
+        except Exception:
+            pass
+
+        # If direct parsing fails, check if LLM output schema-wrapped format
+        # e.g., {"description": "...", "properties": {"summary": "...", ...}}
+        try:
+            data = json.loads(json_str)
+            if isinstance(data, dict) and "properties" in data:
+                # Unwrap the properties and try again
+                return schema.model_validate(data["properties"])
         except Exception:
             continue
     return None
@@ -315,9 +346,11 @@ def generate_dummy_reviews(n_samples: int = 10) -> List[Dict[str, Any]]:
         },
     ]
 
-    # Get schemas as JSON strings
-    review_schema = json.dumps(LLMUniversalReview.model_json_schema(), indent=2)
-    meta_schema = json.dumps(LLMUniversalMetaReview.model_json_schema(), indent=2)
+    # Get cached schema strings
+    review_schema_str = get_review_schema_str()
+    review_example = get_review_example()
+    meta_schema_str = get_meta_schema_str()
+    meta_example = get_meta_example()
 
     prompts = []
     for i in range(n_samples):
@@ -329,7 +362,11 @@ def generate_dummy_reviews(n_samples: int = 10) -> List[Dict[str, Any]]:
             # Generate review
             review_data = review_templates[i % len(review_templates)]
             review_json = json.dumps(review_data, indent=2)
-            prompt = REVIEW_PROMPT_TEMPLATE.format(review_json=review_json, schema=review_schema)
+            prompt = REVIEW_PROMPT_TEMPLATE.format(
+                review_json=review_json,
+                schema_fields=review_schema_str,
+                example_json=review_example
+            )
 
             prompts.append({
                 'submission_id': submission_id,
@@ -344,7 +381,11 @@ def generate_dummy_reviews(n_samples: int = 10) -> List[Dict[str, Any]]:
             # Generate meta-review
             meta_data = meta_templates[i % len(meta_templates)]
             meta_json = json.dumps(meta_data, indent=2)
-            prompt = META_REVIEW_PROMPT_TEMPLATE.format(meta_json=meta_json, schema=meta_schema)
+            prompt = META_REVIEW_PROMPT_TEMPLATE.format(
+                meta_json=meta_json,
+                schema_fields=meta_schema_str,
+                example_json=meta_example
+            )
 
             prompts.append({
                 'submission_id': submission_id,
@@ -377,7 +418,7 @@ class ReviewNormalizer(VLLMTransformer):
         generated_text = row.get("generated_text", "")
         review_type = row.get("type", "review")
 
-        # Handle multiple completions (if n > 1)
+        # Handle multiple completions (if n > 1) - always store as list
         if isinstance(generated_text, list):
             completions = generated_text
         else:
@@ -412,8 +453,9 @@ class ReviewNormalizer(VLLMTransformer):
             'type': row.get('type'),
             'review_index': row.get('review_index'),
             'original_json': row.get('original_json'),
-            # Generated columns
-            'generated_text': generated_text if isinstance(generated_text, str) else completions[0] if completions else "",
+            'prompt': row.get('prompt'),  # Include original prompt
+            # Generated columns - store ALL completions as list
+            'generated_texts': completions,
             'normalized_json': normalized_json,
             'parse_success': parsed is not None,
             # Metrics
@@ -449,8 +491,7 @@ class ReviewNormalizerTest(ReviewNormalizer):
         return cls(
             df=df,
             model_name=model_name,
-            temperature=0.0,
-            max_tokens=1024,
+            max_tokens=4096,
             n=1,  # Single completion for test
             **kwargs
         )
@@ -510,8 +551,7 @@ def run_test_pipeline(
         batch_size=batch_size,
         max_model_len=max_model_len,
         ray_address=ray_address,
-        temperature=0.0,
-        max_tokens=1024,
+        max_tokens=4096,
         n=1,
     )
 
@@ -536,9 +576,9 @@ def run_pipeline(
     tensor_parallel: int = 1,
     concurrency: int = 1,
     batch_size: int = 32,
-    max_model_len: int = 4096,
+    max_model_len: int = 8192,
     ray_address: Optional[str] = None,
-    n_completions: int = 1,  # Must be 1 with temperature=0.0 (greedy sampling)
+    n_completions: int = 2,  # Number of completions to generate
     limit: int = None,
     per_year_limit: int = None,
     dry_run: bool = False,
@@ -574,7 +614,7 @@ def run_pipeline(
     # Load raw notes from pickle
     if verbose:
         print("Loading raw notes from pickle files...")
-    notes_by_id = load_raw_notes(data_dir, years)
+    notes_by_id = load_all_raw_notes(data_dir, years)
     print(f"Total notes loaded: {len(notes_by_id)}")
 
     # Get valid submission IDs (those with images)
@@ -654,8 +694,7 @@ def run_pipeline(
         batch_size=batch_size,
         max_model_len=max_model_len,
         ray_address=ray_address,
-        temperature=0.0,
-        max_tokens=1024,
+        max_tokens=4096,
         n=n_completions,
     )
 
@@ -667,6 +706,152 @@ def run_pipeline(
         total = len(result_df)
         successful = result_df['parse_success'].sum()
         print(f"Total: {total}, Parsed: {successful} ({100*successful/total:.1f}%)")
+
+
+# =============================================================================
+# BATCH PROCESSING (PARQUET INPUT)
+# =============================================================================
+
+def prepare_input_parquet(
+    data_dir: Path = Path("data/full_run"),
+    output_path: Path = Path("data/normalized_reviews/reviews_input.parquet"),
+    years: List[int] = None,
+    verbose: bool = True,
+) -> pd.DataFrame:
+    """Prepare and save all review prompts to parquet for batch processing.
+
+    Loads pickle files, filters valid submissions, builds prompts, saves to parquet.
+    This avoids repeated loading for parallel jobs.
+
+    Args:
+        data_dir: Base data directory with pickle files
+        output_path: Output parquet path
+        years: Years to process (default: all)
+        verbose: Print progress
+
+    Returns:
+        DataFrame with all prompts
+    """
+    years = years or DEFAULT_YEARS
+    data_dir = Path(data_dir)
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Build index of all submissions in normalized directory
+    normalized_dir = data_dir / "normalized"
+    norm_index = build_normalized_index(normalized_dir)
+    valid_ids = set(norm_index.keys())
+
+    if verbose:
+        print(f"Found {len(valid_ids)} submissions in normalized index")
+
+    # Load notes and build prompts
+    all_prompts = []
+    for year in years:
+        pkl_path = data_dir / f"get_all_notes_{year}.pickle"
+        if not pkl_path.exists():
+            if verbose:
+                print(f"  {year}: pickle not found, skipping")
+            continue
+
+        notes = load_raw_notes(pkl_path)
+        year_count = 0
+        year_prompts = 0
+        for note in notes:
+            if note.id not in valid_ids:
+                continue
+            md_path = normalized_dir / str(year) / note.id / f"{note.id}.md"
+            md_path_str = str(md_path) if md_path.exists() else None
+            prompts = build_review_prompts(note.id, year, note, md_path_str)
+            all_prompts.extend(prompts)
+            year_count += 1
+            year_prompts += len(prompts)
+
+        if verbose:
+            print(f"  {year}: {year_count} submissions, {year_prompts} prompts")
+
+    df = pd.DataFrame(all_prompts)
+    df.to_parquet(output_path)
+
+    if verbose:
+        print(f"\nSaved {len(df)} prompts to {output_path}")
+        print(f"  Reviews: {(df['type'] == 'review').sum()}")
+        print(f"  Meta-reviews: {(df['type'] == 'meta').sum()}")
+
+    return df
+
+
+def run_from_parquet(
+    input_parquet: Path,
+    output_dir: Path,
+    batch_idx: int = 0,
+    num_batches: int = 1,
+    model_name: str = "meta-llama/Llama-3.1-8B-Instruct",
+    tensor_parallel: int = 2,
+    concurrency: int = 1,
+    batch_size: int = 32,
+    max_model_len: int = 8192,
+    ray_address: Optional[str] = None,
+    n_completions: int = 2,
+    verbose: bool = True,
+):
+    """Run normalization on a batch slice of the input parquet.
+
+    Args:
+        input_parquet: Path to reviews_input.parquet
+        output_dir: Base output directory (batch_{idx} appended)
+        batch_idx: Which batch (0 to num_batches-1)
+        num_batches: Total number of batches
+        model_name: HuggingFace model name
+        tensor_parallel: GPUs per replica
+        concurrency: Number of vLLM replicas
+        batch_size: Batch size for inference
+        max_model_len: Maximum context length
+        ray_address: Ray cluster address
+        n_completions: Completions per request
+        verbose: Print progress
+    """
+    input_parquet = Path(input_parquet)
+    output_dir = Path(output_dir)
+
+    # Read parquet
+    df = pd.read_parquet(input_parquet)
+
+    # Slice for this batch
+    total_rows = len(df)
+    batch_size_rows = total_rows // num_batches
+    start_idx = batch_idx * batch_size_rows
+    # Last batch gets remaining rows
+    end_idx = start_idx + batch_size_rows if batch_idx < num_batches - 1 else total_rows
+    df_batch = df.iloc[start_idx:end_idx].copy()
+
+    if verbose:
+        print(f"Batch {batch_idx}/{num_batches}: rows {start_idx}-{end_idx} ({len(df_batch)} prompts)")
+
+    # Output path
+    batch_output_dir = output_dir / f"batch_{batch_idx}"
+    batch_output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = batch_output_dir / "normalized.parquet"
+
+    # Run normalizer
+    normalizer = ReviewNormalizer(
+        df=df_batch,
+        model_name=model_name,
+        tensor_parallel=tensor_parallel,
+        concurrency=concurrency,
+        batch_size=batch_size,
+        max_model_len=max_model_len,
+        ray_address=ray_address,
+        max_tokens=4096,
+        n=n_completions,
+    )
+    normalizer.transform_to_parquet(str(output_path))
+
+    if verbose:
+        result = pd.read_parquet(output_path)
+        success_rate = result['parse_success'].mean() * 100
+        print(f"Batch {batch_idx} complete: {success_rate:.1f}% parse success")
+        print(f"Output: {output_path}")
 
 
 def main():
@@ -685,12 +870,12 @@ def main():
                         help="Number of vLLM replicas")
     parser.add_argument("--batch-size", type=int, default=32,
                         help="Batch size for inference")
-    parser.add_argument("--max-model-len", type=int, default=4096,
+    parser.add_argument("--max-model-len", type=int, default=8192,
                         help="Maximum context length")
     parser.add_argument("--ray-address", type=str, default=None,
                         help="Ray cluster address")
-    parser.add_argument("--n-completions", type=int, default=1,
-                        help="Number of completions per request (must be 1 with temperature=0)")
+    parser.add_argument("--n-completions", type=int, default=2,
+                        help="Number of completions per request")
     parser.add_argument("--limit", type=int, default=None,
                         help="Limit number of submissions")
     parser.add_argument("--dry-run", action="store_true",
@@ -708,7 +893,45 @@ def main():
     parser.add_argument("--quiet", action="store_true",
                         help="Suppress progress output")
 
+    # Batch processing modes
+    parser.add_argument("--prepare-input", action="store_true",
+                        help="Prepare input parquet from pickle files (run once)")
+    parser.add_argument("--input-parquet", type=Path, default=None,
+                        help="Path to prepared input parquet (skip pickle loading)")
+    parser.add_argument("--batch-idx", type=int, default=0,
+                        help="Batch index for job array (0 to num-batches-1)")
+    parser.add_argument("--num-batches", type=int, default=1,
+                        help="Total number of batches")
+
     args = parser.parse_args()
+
+    # Prepare input parquet mode - run once to create reviews_input.parquet
+    if args.prepare_input:
+        prepare_input_parquet(
+            data_dir=args.data_dir,
+            output_path=args.output_path or Path("data/normalized_reviews/reviews_input.parquet"),
+            verbose=not args.quiet,
+        )
+        return
+
+    # Batch processing mode - process a slice of the input parquet
+    if args.input_parquet:
+        output_dir = args.output_dir or Path("data/normalized_reviews")
+        run_from_parquet(
+            input_parquet=args.input_parquet,
+            output_dir=output_dir,
+            batch_idx=args.batch_idx,
+            num_batches=args.num_batches,
+            model_name=args.model_name,
+            tensor_parallel=args.tensor_parallel,
+            concurrency=args.concurrency,
+            batch_size=args.batch_size,
+            max_model_len=args.max_model_len,
+            ray_address=args.ray_address,
+            n_completions=args.n_completions,
+            verbose=not args.quiet,
+        )
+        return
 
     # Test run mode - uses dummy data, no pickle loading needed
     if args.test_run:
