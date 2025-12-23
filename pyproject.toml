@@ -55,6 +55,14 @@ dependencies = [
     "multiprocess==0.70.11"
 ]
 
+[project.optional-dependencies]
+# LlamaFactory training - install separately due to version conflicts
+# Run: pip install llamafactory==0.9.3 --no-deps
+# Then: pip install trl>=0.8.6,<=0.9.6 peft>=0.14.0,<=0.15.2
+llamafactory = [
+    "trl>=0.8.6,<=0.9.6",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

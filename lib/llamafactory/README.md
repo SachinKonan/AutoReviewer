@@ -17,20 +17,45 @@ A flexible, composable infrastructure for training and predicting paper outcomes
 
 ## Installation
 
-Add the following to your `pyproject.toml`:
+The core infrastructure works without LlamaFactory for zero-shot inference.
+For SFT/GRPO training, install LlamaFactory separately due to version conflicts.
 
-```toml
-[project.dependencies]
-llamafactory = ">=0.8.0"
-easyr1 = ">=0.1.0"  # For GRPO training
-vllm = ">=0.4.0"
-pyyaml = ">=6.0"
-```
-
-Or install directly:
+### Step 1: Sync main dependencies
 
 ```bash
-pip install llamafactory[torch,vllm] easyr1
+uv sync
+```
+
+### Step 2: Install LlamaFactory (for training only)
+
+Due to version conflicts with numpy/peft, install LlamaFactory separately:
+
+```bash
+# Option A: Install with --no-deps and add compatible versions
+pip install llamafactory==0.9.3 --no-deps
+pip install trl>=0.8.6,<=0.9.6
+
+# Option B: Use a separate virtual environment for training
+uv venv .venv-train
+source .venv-train/bin/activate
+pip install llamafactory[torch,vllm]
+```
+
+### What works without LlamaFactory
+
+- **Zero-shot prediction**: Uses vLLM directly
+- **Data preparation**: Creates LlamaFactory-compatible JSON files
+- **Config generation**: Creates YAML configs for `llamafactory-cli`
+
+### What requires LlamaFactory
+
+- **SFT training via Python API**: `SFTLoRAMode.train()`
+- **GRPO training via Python API**: `GRPOMode.train()`
+
+You can always use the generated configs with `llamafactory-cli` directly:
+
+```bash
+llamafactory-cli train outputs/sft_config.yaml
 ```
 
 ---
@@ -49,12 +74,13 @@ from lib.llamafactory import (
     ModelType,
 )
 
-# 1. Load data
-loader = ICLRDataLoader(
-    data_dir=Path("data/full_run"),
-    image_base_dir=Path("data/full_run/normalized"),
-)
-submissions = list(loader.load_from_csv(Path("data/iclr_data.csv")))
+# 1. Load data from HuggingFace (recommended)
+loader = ICLRDataLoader()
+submissions = list(loader.load_from_huggingface(
+    dataset_name="skonan/iclr-reviews-2020-2026",
+    split="2024",  # or "all", "2020", "2021", etc.
+    load_images=True,
+))
 
 # 2. Create predictor
 predictor = UnifiedPredictor.create(
