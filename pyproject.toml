@@ -52,7 +52,10 @@ dependencies = [
     "pip>=25.3",
     "uvloop==0.21.0",
     "simplejson",
-    "multiprocess==0.70.11"
+    "multiprocess==0.70.11",
+    "idna>=3.11",
+    "charset-normalizer>=3.4.4",
+    "chardet>=5.2.0",
 ]
 
 [project.optional-dependencies]

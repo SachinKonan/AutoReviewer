@@ -12,7 +12,7 @@ from lib.llamafactory.training.base import build_prompt
 # Load a few submissions from all splits
 loader = ICLRDataLoader()
 subs = []
-for i, s in enumerate(loader.load_from_huggingface(split="all", load_images=False)):
+for i, s in enumerate(loader.load_from_huggingface(years=["2020"], load_images=False)):
     subs.append(s)
     if i >= 4:
         break
