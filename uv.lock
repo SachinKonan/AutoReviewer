@@ -2686,7 +2686,7 @@ wheels = [
 
 [[package]]
 name = "multiprocess"
-version = "0.70.18"
+version = "0.70.11"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "dill" },
