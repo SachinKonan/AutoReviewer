@@ -4,4 +4,4 @@ data/
 lib/__pycache__/
 MinerU/
 scripts/__pycache__/
-lib/vllm_utils/__pycache__/
+lib/**/__pycache__/

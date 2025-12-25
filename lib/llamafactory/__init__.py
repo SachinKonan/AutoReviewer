@@ -6,36 +6,26 @@ paper outcomes using LlamaFactory with Qwen models.
 
 Example usage:
     from lib.llamafactory import (
-        ICLRDataLoader,
-        TextWithImagesFormatter,
-        BinaryAcceptRejectHandler,
-        SFTLoRAMode,
-        UnifiedPredictor,
-        PredictorConfig,
-        TrainingConfig,
+        RayDataPredictor,
         InputModality,
         OutputType,
-        TrainingMode,
-        ModelType,
     )
 
-    # Load data
-    loader = ICLRDataLoader(data_dir=Path("data"))
-    submissions = list(loader.load_from_csv(Path("data.csv")))
-
-    # Create predictor
-    predictor = UnifiedPredictor.create(
-        input_modality=InputModality.TEXT_WITH_IMAGES,
+    # Create predictor (uses Ray Data + vLLM)
+    predictor = RayDataPredictor(
+        input_modality=InputModality.TEXT_ONLY,
         output_type=OutputType.BINARY,
-        training_mode=TrainingMode.SFT_LORA,
-        config=PredictorConfig(
-            model_name_or_path="Qwen/Qwen2.5-VL-7B-Instruct",
-            model_type=ModelType.VISION_LANGUAGE,
-        ),
+        model_name="Qwen/Qwen2.5-7B-Instruct",
+        ray_address="auto",
+        include_markdown=True,
     )
 
-    # Run predictions
-    results = predictor.predict(submissions)
+    # Run inference (streaming to parquet)
+    predictor.predict_from_hf_dataset(
+        dataset_path="data/iclr_split",
+        output_path="outputs/predictions.parquet",
+        split="test",
+    )
 """
 
 # Core types and enums
@@ -117,7 +107,7 @@ from .configs.generator import (
 )
 
 # Inference
-from .inference.predictor import UnifiedPredictor, BatchPredictor
+from .inference.ray_predictor import RayDataPredictor
 
 __all__ = [
     # Core types
@@ -178,6 +168,5 @@ __all__ = [
     "generate_dataset_info",
     "create_experiment_configs",
     # Inference
-    "UnifiedPredictor",
-    "BatchPredictor",
+    "RayDataPredictor",
 ]

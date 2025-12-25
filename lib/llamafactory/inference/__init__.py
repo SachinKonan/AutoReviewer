@@ -1,8 +1,7 @@
 """Inference utilities for LlamaFactory infrastructure."""
 
-from .predictor import UnifiedPredictor, BatchPredictor
+from .ray_predictor import RayDataPredictor
 
 __all__ = [
-    "UnifiedPredictor",
-    "BatchPredictor",
+    "RayDataPredictor",
 ]
