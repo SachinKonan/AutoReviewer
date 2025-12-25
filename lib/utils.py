@@ -625,10 +625,10 @@ def get_coverage_stats(
 # PIPELINE STATISTICS (Full pipeline from submissions to images)
 # =============================================================================
 
-def build_mineru_index(mineru_dir: Path) -> tuple[dict[str, Path], dict[str, Path], dict[str, Path]]:
+def build_mineru_index(mineru_dir: Path, num_workers: int = 32) -> tuple[dict[str, Path], dict[str, Path], dict[str, Path]]:
     """Build index mapping folder name -> content_list.json path across all batches.
 
-    Uses os.scandir() for fast directory traversal.
+    Uses os.scandir() for fast directory traversal with threading for file checks.
 
     Returns:
         (index, fixed_index, fixed_pt2_index):
@@ -636,29 +636,51 @@ def build_mineru_index(mineru_dir: Path) -> tuple[dict[str, Path], dict[str, Pat
         - fixed_index: batch_2020_fixed only
         - fixed_pt2_index: batch_2020_fixed_pt2 only (highest priority for 2020)
     """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     index = {}
     fixed_index = {}
     fixed_pt2_index = {}
 
+    def check_folder(batch_name: str, entry_path: str, folder_name: str) -> tuple[str, str, Path] | None:
+        """Check if folder has valid content_list.json."""
+        content_list_path = Path(entry_path) / "vlm" / f"{folder_name}_content_list.json"
+        try:
+            if content_list_path.exists() and content_list_path.stat().st_size > 10:
+                return (batch_name, folder_name, content_list_path)
+        except Exception:
+            pass
+        return None
+
+    # Collect all folder entries first
+    folder_entries = []
     for batch_dir in sorted(mineru_dir.glob("batch_*")):
         batch_name = batch_dir.name
         with os.scandir(batch_dir) as entries:
             for entry in entries:
                 if entry.is_dir():
-                    folder_name = entry.name
-                    content_list_path = Path(entry.path) / "vlm" / f"{folder_name}_content_list.json"
-                    if content_list_path.exists() and content_list_path.stat().st_size > 10:
-                        index[folder_name] = content_list_path
-                        if batch_name == "batch_2020_fixed":
-                            fixed_index[folder_name] = content_list_path
-                        elif batch_name == "batch_2020_fixed_pt2":
-                            fixed_pt2_index[folder_name] = content_list_path
+                    folder_entries.append((batch_name, entry.path, entry.name))
+
+    # Check folders in parallel
+    with ThreadPoolExecutor(max_workers=num_workers) as executor:
+        futures = [executor.submit(check_folder, *args) for args in folder_entries]
+        for future in as_completed(futures):
+            result = future.result()
+            if result:
+                batch_name, folder_name, content_list_path = result
+                index[folder_name] = content_list_path
+                if batch_name == "batch_2020_fixed":
+                    fixed_index[folder_name] = content_list_path
+                elif batch_name == "batch_2020_fixed_pt2":
+                    fixed_pt2_index[folder_name] = content_list_path
 
     return index, fixed_index, fixed_pt2_index
 
 
-def build_normalized_index(normalized_dir: Path) -> dict[str, dict]:
-    """Build index of normalized outputs using os.scandir().
+def build_normalized_index(normalized_dir: Path, num_workers: int = 32) -> dict[str, dict]:
+    """Build index of normalized outputs using os.scandir() with threading.
+
+    Uses ThreadPoolExecutor for parallel I/O on network filesystems.
 
     Returns:
         Dict mapping submission_id -> {
@@ -669,61 +691,80 @@ def build_normalized_index(normalized_dir: Path) -> dict[str, dict]:
         }
     """
     import json
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     index = {}
 
     if not normalized_dir.exists():
         return index
 
+    def process_submission(sub_path: Path) -> tuple[str, dict]:
+        """Process a single submission directory."""
+        sub_id = sub_path.name
+        pdf_path = sub_path / f"{sub_id}.pdf"
+        meta_path = sub_path / f"{sub_id}_meta.json"
+        img_dir = sub_path / "redacted_pdf_img_content"
+
+        # Count images using scandir (fast)
+        image_count = 0
+        if img_dir.exists():
+            try:
+                with os.scandir(img_dir) as img_entries:
+                    for img_entry in img_entries:
+                        if img_entry.name.startswith("page_") and img_entry.name.endswith(".png"):
+                            image_count += 1
+            except Exception:
+                pass
+
+        # Load meta.json if exists
+        meta_data = None
+        if meta_path.exists():
+            try:
+                with open(meta_path) as f:
+                    m = json.load(f)
+                meta_data = {
+                    'has_abstract': m.get('has_abstract', False),
+                    'has_references': m.get('has_references', False),
+                    'page_end': m.get('page_end', 0),
+                    'original_pdf_path': m.get('original_pdf_path'),
+                    'anonymized_abstract': m.get('anonymized_abstract', ''),
+                    'removed_before_intro_count': m.get('removed_before_intro_count', 0),
+                    'removed_footnotes_count': m.get('removed_footnotes_count', 0),
+                    'removed_reproducibility_count': m.get('removed_reproducibility_count', 0),
+                    'removed_acknowledgments_count': m.get('removed_acknowledgments_count', 0),
+                    'removed_github_in_abstract': m.get('removed_github_in_abstract', False),
+                    'headers_whiteout_count': m.get('headers_whiteout_count', 0),
+                }
+            except Exception:
+                pass
+
+        return sub_id, {
+            'pdf': pdf_path.exists(),
+            'meta_path': meta_path if meta_path.exists() else None,
+            'image_count': image_count,
+            'meta': meta_data
+        }
+
+    # Collect all submission paths first (fast directory scan)
+    submission_paths = []
     with os.scandir(normalized_dir) as year_entries:
         for year_entry in year_entries:
             if not year_entry.is_dir():
                 continue
             with os.scandir(year_entry.path) as sub_entries:
                 for sub_entry in sub_entries:
-                    if not sub_entry.is_dir():
-                        continue
-                    sub_id = sub_entry.name
-                    sub_path = Path(sub_entry.path)
-                    pdf_path = sub_path / f"{sub_id}.pdf"
-                    meta_path = sub_path / f"{sub_id}_meta.json"
-                    img_dir = sub_path / "redacted_pdf_img_content"
+                    if sub_entry.is_dir():
+                        submission_paths.append(Path(sub_entry.path))
 
-                    # Count images using scandir (fast)
-                    image_count = 0
-                    if img_dir.exists():
-                        with os.scandir(img_dir) as img_entries:
-                            for img_entry in img_entries:
-                                if img_entry.name.startswith("page_") and img_entry.name.endswith(".png"):
-                                    image_count += 1
-
-                    # Load meta.json if exists
-                    meta_data = None
-                    if meta_path.exists():
-                        try:
-                            with open(meta_path) as f:
-                                m = json.load(f)
-                            meta_data = {
-                                'has_abstract': m.get('has_abstract', False),
-                                'has_references': m.get('has_references', False),
-                                'page_end': m.get('page_end', 0),
-                                'original_pdf_path': m.get('original_pdf_path'),
-                                'anonymized_abstract': m.get('anonymized_abstract', ''),
-                                'removed_before_intro_count': m.get('removed_before_intro_count', 0),
-                                'removed_footnotes_count': m.get('removed_footnotes_count', 0),
-                                'removed_reproducibility_count': m.get('removed_reproducibility_count', 0),
-                                'removed_acknowledgments_count': m.get('removed_acknowledgments_count', 0),
-                                'removed_github_in_abstract': m.get('removed_github_in_abstract', False),
-                                'headers_whiteout_count': m.get('headers_whiteout_count', 0),
-                            }
-                        except Exception:
-                            pass
-
-                    index[sub_id] = {
-                        'pdf': pdf_path.exists(),
-                        'meta_path': meta_path if meta_path.exists() else None,
-                        'image_count': image_count,
-                        'meta': meta_data
-                    }
+    # Process submissions in parallel using threads
+    with ThreadPoolExecutor(max_workers=num_workers) as executor:
+        futures = {executor.submit(process_submission, path): path for path in submission_paths}
+        for future in as_completed(futures):
+            try:
+                sub_id, data = future.result()
+                index[sub_id] = data
+            except Exception:
+                pass
 
     return index
 
@@ -880,7 +921,8 @@ def get_pipeline_stats(
                 has_images = image_count == page_end + 1 and page_end >= 0
 
                 # Clean: no github in abstract (removed_github_in_abstract == False) AND has_abstract
-                no_github = not meta.get('removed_github_in_abstract', False)
+                #no_github = not meta.get('removed_github_in_abstract', False)
+                no_github = True
                 is_clean = has_abs and no_github
 
                 # Store meta for manipulation stats

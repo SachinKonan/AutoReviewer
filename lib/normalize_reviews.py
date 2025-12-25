@@ -46,7 +46,9 @@ from lib.vllm_utils.transform import VLLMTransformer
 # PROMPT TEMPLATES
 # =============================================================================
 
-REVIEW_PROMPT_TEMPLATE = """Extract and normalize this ICLR review into a structured JSON format.
+REVIEW_PROMPT_TEMPLATE = """Extract and normalize this ICLR review into a structured JSON format. This is a structuring task
+do not hallucinate details unpresent in the original. Leave fields unfilled if no details are present. Fill fields
+if there is evidence in the original.
 
 Original Review:
 {review_json}
@@ -60,7 +62,9 @@ Example output format:
 JSON:"""
 
 
-META_REVIEW_PROMPT_TEMPLATE = """Extract and normalize this ICLR meta-review into a structured JSON format.
+META_REVIEW_PROMPT_TEMPLATE = """Extract and normalize this ICLR review into a structured JSON format. This is a structuring task
+do not hallucinate details unpresent in the original. Leave fields unfilled if no details are present. Fill fields
+if there is evidence in the original.
 
 Original Meta-Review:
 {meta_json}
@@ -791,6 +795,7 @@ def run_from_parquet(
     concurrency: int = 1,
     batch_size: int = 32,
     max_model_len: int = 8192,
+    max_tokens: int = 4096,
     ray_address: Optional[str] = None,
     n_completions: int = 2,
     verbose: bool = True,
@@ -833,6 +838,30 @@ def run_from_parquet(
     batch_output_dir.mkdir(parents=True, exist_ok=True)
     output_path = batch_output_dir / "normalized.parquet"
 
+    # Resume: skip already-processed samples
+    if output_path.exists():
+        done_df = pd.read_parquet(output_path)
+        done_keys = set(
+            done_df['submission_id'] + '_' +
+            done_df['type'] + '_' +
+            done_df['review_index'].astype(str)
+        )
+
+        df_batch['_key'] = (
+            df_batch['submission_id'] + '_' +
+            df_batch['type'] + '_' +
+            df_batch['review_index'].astype(str)
+        )
+        original_count = len(df_batch)
+        df_batch = df_batch[~df_batch['_key'].isin(done_keys)].drop(columns=['_key'])
+
+        if verbose:
+            print(f"Resume: {len(done_keys)} already done, {len(df_batch)} remaining (of {original_count})")
+
+        if len(df_batch) == 0:
+            print("All samples already processed!")
+            return
+
     # Run normalizer
     normalizer = ReviewNormalizer(
         df=df_batch,
@@ -841,8 +870,8 @@ def run_from_parquet(
         concurrency=concurrency,
         batch_size=batch_size,
         max_model_len=max_model_len,
+        max_tokens=max_tokens,
         ray_address=ray_address,
-        max_tokens=4096,
         n=n_completions,
     )
     normalizer.transform_to_parquet(str(output_path))
@@ -872,6 +901,8 @@ def main():
                         help="Batch size for inference")
     parser.add_argument("--max-model-len", type=int, default=8192,
                         help="Maximum context length")
+    parser.add_argument("--max-tokens", type=int, default=4096,
+                        help="Maximum output tokens")
     parser.add_argument("--ray-address", type=str, default=None,
                         help="Ray cluster address")
     parser.add_argument("--n-completions", type=int, default=2,
@@ -927,6 +958,7 @@ def main():
             concurrency=args.concurrency,
             batch_size=args.batch_size,
             max_model_len=args.max_model_len,
+            max_tokens=args.max_tokens,
             ray_address=args.ray_address,
             n_completions=args.n_completions,
             verbose=not args.quiet,

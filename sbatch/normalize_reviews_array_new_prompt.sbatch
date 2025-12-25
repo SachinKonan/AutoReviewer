@@ -5,8 +5,8 @@
 #SBATCH --mem=256G
 #SBATCH --exclusive
 #SBATCH --gres=gpu:8
-#SBATCH --output=logs/normalize_reviews/normalize_reviews_%A_%a.out
-#SBATCH --error=logs/normalize_reviews/normalize_reviews_%A_%a.err
+#SBATCH --output=logs/normalize_reviews_3/normalize_reviews_%A_%a.out
+#SBATCH --error=logs/normalize_reviews_3/normalize_reviews_%A_%a.err
 
 # Normalize ICLR reviews using vLLM with SLURM job array
 # Each job processes 1/8 of the input parquet
@@ -60,7 +60,7 @@ echo "Starting batch $SLURM_ARRAY_TASK_ID normalization..."
 
 python -u -m lib.normalize_reviews \
     --input-parquet data/normalized_reviews/reviews_input.parquet \
-    --output-dir data/normalized_reviews \
+    --output-dir data/normalized_reviews_2 \
     --batch-idx $SLURM_ARRAY_TASK_ID \
     --num-batches 2 \
     --tensor-parallel 4 \
