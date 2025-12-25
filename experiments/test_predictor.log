@@ -1,0 +1,84 @@
+Splits to load:  ['2020']
+Loading 2020 from local path
+Loaded 2020 of length 2198
+
+DEBUG: Processing dataset, type=<class 'datasets.arrow_dataset.Dataset'>, len=2198
+DEBUG: Got row with keys: ['submission_id', 'year', 'openreview_link', 'pdf_download_link', 'title']
+DEBUG: Got row with keys: ['submission_id', 'year', 'openreview_link', 'pdf_download_link', 'title']
+DEBUG: Got row with keys: ['submission_id', 'year', 'openreview_link', 'pdf_download_link', 'title']
+DEBUG: Got row with keys: ['submission_id', 'year', 'openreview_link', 'pdf_download_link', 'title']
+DEBUG: Got row with keys: ['submission_id', 'year', 'openreview_link', 'pdf_download_link', 'title']
+DEBUG: Got row with keys: ['submission_id', 'year', 'openreview_link', 'pdf_download_link', 'title']
+DEBUG: Got row with keys: ['submission_id', 'year', 'openreview_link', 'pdf_download_link', 'title']
+DEBUG: Got row with keys: ['submission_id', 'year', 'openreview_link', 'pdf_download_link', 'title']
+DEBUG: Got row with keys: ['submission_id', 'year', 'openreview_link', 'pdf_download_link', 'title']
+DEBUG: Got row with keys: ['submission_id', 'year', 'openreview_link', 'pdf_download_link', 'title']
+INFO 12-24 22:41:55 [utils.py:253] non-default args: {'trust_remote_code': True, 'disable_log_stats': True, 'model': 'Qwen/Qwen2.5-0.5B-Instruct'}
+INFO 12-24 22:41:55 [model.py:631] Resolved architecture: Qwen2ForCausalLM
+INFO 12-24 22:41:55 [model.py:1745] Using max model len 32768
+INFO 12-24 22:41:55 [scheduler.py:216] Chunked prefill is enabled with max_num_batched_tokens=8192.
+[1;36m(EngineCore_DP0 pid=2785618)[0;0m INFO 12-24 22:41:56 [core.py:93] Initializing a V1 LLM engine (v0.11.2) with config: model='Qwen/Qwen2.5-0.5B-Instruct', speculative_config=None, tokenizer='Qwen/Qwen2.5-0.5B-Instruct', skip_tokenizer_init=False, tokenizer_mode=auto, revision=None, tokenizer_revision=None, trust_remote_code=True, dtype=torch.bfloat16, max_seq_len=32768, download_dir=None, load_format=auto, tensor_parallel_size=1, pipeline_parallel_size=1, data_parallel_size=1, disable_custom_all_reduce=False, quantization=None, enforce_eager=False, kv_cache_dtype=auto, device_config=cuda, structured_outputs_config=StructuredOutputsConfig(backend='auto', disable_fallback=False, disable_any_whitespace=False, disable_additional_properties=False, reasoning_parser='', reasoning_parser_plugin='', enable_in_reasoning=False), observability_config=ObservabilityConfig(show_hidden_metrics_for_version=None, otlp_traces_endpoint=None, collect_detailed_traces=None), seed=0, served_model_name=Qwen/Qwen2.5-0.5B-Instruct, enable_prefix_caching=True, enable_chunked_prefill=True, pooler_config=None, compilation_config={'level': None, 'mode': <CompilationMode.VLLM_COMPILE: 3>, 'debug_dump_path': None, 'cache_dir': '', 'compile_cache_save_format': 'binary', 'backend': 'inductor', 'custom_ops': ['none'], 'splitting_ops': ['vllm::unified_attention', 'vllm::unified_attention_with_output', 'vllm::unified_mla_attention', 'vllm::unified_mla_attention_with_output', 'vllm::mamba_mixer2', 'vllm::mamba_mixer', 'vllm::short_conv', 'vllm::linear_attention', 'vllm::plamo2_mamba_mixer', 'vllm::gdn_attention_core', 'vllm::kda_attention', 'vllm::sparse_attn_indexer'], 'compile_mm_encoder': False, 'use_inductor': None, 'compile_sizes': [], 'inductor_compile_config': {'enable_auto_functionalized_v2': False, 'combo_kernels': True, 'benchmark_combo_kernel': True}, 'inductor_passes': {}, 'cudagraph_mode': <CUDAGraphMode.FULL_AND_PIECEWISE: (2, 1)>, 'cudagraph_num_of_warmups': 1, 'cudagraph_capture_sizes': [1, 2, 4, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120, 128, 136, 144, 152, 160, 168, 176, 184, 192, 200, 208, 216, 224, 232, 240, 248, 256, 272, 288, 304, 320, 336, 352, 368, 384, 400, 416, 432, 448, 464, 480, 496, 512], 'cudagraph_copy_inputs': False, 'cudagraph_specialize_lora': True, 'use_inductor_graph_partition': False, 'pass_config': {}, 'max_cudagraph_capture_size': 512, 'local_cache_dir': None}
+[1;36m(EngineCore_DP0 pid=2785618)[0;0m INFO 12-24 22:41:58 [parallel_state.py:1208] world_size=1 rank=0 local_rank=0 distributed_init_method=tcp://172.17.32.103:56795 backend=nccl
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[1;36m(EngineCore_DP0 pid=2785618)[0;0m INFO 12-24 22:41:58 [parallel_state.py:1394] rank 0 in world size 1 is assigned as DP rank 0, PP rank 0, TP rank 0, EP rank 0
+[1;36m(EngineCore_DP0 pid=2785618)[0;0m INFO 12-24 22:41:58 [gpu_model_runner.py:3259] Starting to load model Qwen/Qwen2.5-0.5B-Instruct...
+[1;36m(EngineCore_DP0 pid=2785618)[0;0m INFO 12-24 22:41:59 [cuda.py:418] Valid backends: ['FLASH_ATTN', 'FLASHINFER', 'TRITON_ATTN', 'FLEX_ATTENTION']
+[1;36m(EngineCore_DP0 pid=2785618)[0;0m INFO 12-24 22:41:59 [cuda.py:427] Using FLASH_ATTN backend.
+[1;36m(EngineCore_DP0 pid=2785618)[0;0m INFO 12-24 22:42:00 [weight_utils.py:481] No model.safetensors.index.json found in remote.
+[1;36m(EngineCore_DP0 pid=2785618)[0;0m INFO 12-24 22:42:00 [default_loader.py:314] Loading weights took 0.20 seconds
+[1;36m(EngineCore_DP0 pid=2785618)[0;0m INFO 12-24 22:42:01 [gpu_model_runner.py:3338] Model loading took 0.9269 GiB memory and 1.726131 seconds
+[1;36m(EngineCore_DP0 pid=2785618)[0;0m INFO 12-24 22:42:06 [backends.py:631] Using cache directory: /n/fs/vision-mix/jl0796/vllm/torch_compile_cache/adbeadfbd0/rank_0_0/backbone for vLLM's torch.compile
+[1;36m(EngineCore_DP0 pid=2785618)[0;0m INFO 12-24 22:42:06 [backends.py:647] Dynamo bytecode transform time: 4.99 s
+[1;36m(EngineCore_DP0 pid=2785618)[0;0m INFO 12-24 22:42:08 [backends.py:210] Directly load the compiled graph(s) for dynamic shape from the cache, took 1.945 s
+[1;36m(EngineCore_DP0 pid=2785618)[0;0m INFO 12-24 22:42:09 [monitor.py:34] torch.compile takes 6.94 s in total
+[1;36m(EngineCore_DP0 pid=2785618)[0;0m INFO 12-24 22:42:10 [gpu_worker.py:359] Available KV cache memory: 37.59 GiB
+[1;36m(EngineCore_DP0 pid=2785618)[0;0m INFO 12-24 22:42:10 [kv_cache_utils.py:1229] GPU KV cache size: 3,284,656 tokens
+[1;36m(EngineCore_DP0 pid=2785618)[0;0m INFO 12-24 22:42:10 [kv_cache_utils.py:1234] Maximum concurrency for 32,768 tokens per request: 100.24x
+[1;36m(EngineCore_DP0 pid=2785618)[0;0m INFO 12-24 22:42:13 [gpu_model_runner.py:4244] Graph capturing finished in 3 secs, took 0.46 GiB
+[1;36m(EngineCore_DP0 pid=2785618)[0;0m INFO 12-24 22:42:13 [core.py:250] init engine (profile, create kv cache, warmup model) took 12.63 seconds
+INFO 12-24 22:42:14 [llm.py:352] Supported tasks: ['generate']
+Raw: Reasoning: The paper presents a novel zeroth-order optimization framework for learning to learn, which is a significant advancement in the field of machine learning. The authors demonstrate that this 
+Prediction: Accept
+Reasoning: The paper presents a novel zeroth-order optimization framework for learning to learn, which is a significant advancement in the field of machine learning. The authors demonstrate that this framework o
+---
+Raw: Reasoning: The paper presents a novel approach to transfer learning that uses attentive feature selection and selective feature distillation to improve the performance of CNNs. The authors propose AFD
+Prediction: Accept
+Reasoning: The paper presents a novel approach to transfer learning that uses attentive feature selection and selective feature distillation to improve the performance of CNNs. The authors propose AFDS, which dy
+---
+Raw: Reasoning: The paper presents a novel approach to predicting quantum optical experiments using long short-term memory (LSTM) networks. The authors show that LSTM networks can learn to predict the char
+Prediction: Accept
+Reasoning: The paper presents a novel approach to predicting quantum optical experiments using long short-term memory (LSTM) networks. The authors show that LSTM networks can learn to predict the characteristics
+---
+Raw: Reasoning: The paper introduces a novel synthetic oversampling method for variable length, multi-feature sequence datasets based on autoencoders and generative adversarial networks. The authors show t
+Prediction: Accept
+Reasoning: The paper introduces a novel synthetic oversampling method for variable length, multi-feature sequence datasets based on autoencoders and generative adversarial networks. The authors show that this me
+---
+Raw: Reasoning: The paper presents a novel approach to detecting out-of-distribution (OOD) inputs in regression tasks using a generative model. The authors propose fitting a density model to the last layer
+Prediction: Accept
+Reasoning: The paper presents a novel approach to detecting out-of-distribution (OOD) inputs in regression tasks using a generative model. The authors propose fitting a density model to the last layer of an MLP 
+---
+Raw: Reasoning: The paper presents a novel approach to diversifying trajectories generated by a VAE, using determinantal point processes (DPPs) to capture diversity. The authors propose a diversity samplin
+Prediction: Accept
+Reasoning: The paper presents a novel approach to diversifying trajectories generated by a VAE, using determinantal point processes (DPPs) to capture diversity. The authors propose a diversity sampling function 
+---
+Raw: Reasoning: The paper introduces a new set of deep contextualized word representations for computer programs based on language models, which are then fine-tuned for the downstream task of bug detection
+Prediction: Accept
+Reasoning: The paper introduces a new set of deep contextualized word representations for computer programs based on language models, which are then fine-tuned for the downstream task of bug detection. The autho
+---
+Raw: Reasoning: The paper presents a novel method for aggregating local explanations from LIME to generate global and class-level interpretations. The method is simple and effective, and it is well motivat
+Prediction: Reject
+Reasoning: The paper presents a novel method for aggregating local explanations from LIME to generate global and class-level interpretations. The method is simple and effective, and it is well motivated by the i
+---
+Raw: Reasoning: The paper presents a comprehensive study on weight sharing in neural architecture search (NAS). The authors conduct extensive experiments to explore the impact of weight sharing on model ev
+Prediction: Accept
+Reasoning: The paper presents a comprehensive study on weight sharing in neural architecture search (NAS). The authors conduct extensive experiments to explore the impact of weight sharing on model evaluation, t
+---
+Raw: Reasoning: The paper presents a novel approach to learning dynamical systems using physics-inspired inductive biases. The authors successfully integrate Hamiltonian dynamics into a neural network fram
+Prediction: Accept
+Reasoning: The paper presents a novel approach to learning dynamical systems using physics-inspired inductive biases. The authors successfully integrate Hamiltonian dynamics into a neural network framework, enab
+---

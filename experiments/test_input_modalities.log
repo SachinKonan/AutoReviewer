@@ -1,0 +1,198 @@
+============================================================
+INPUT MODALITY TESTS
+============================================================
+Dataset: /n/fs/vision-mix/jl0796/iclr-reviews-2020-2026
+Text Model: Qwen/Qwen2.5-0.5B-Instruct
+VL Model: Qwen/Qwen2.5-VL-7B-Instruct
+Samples per test: 3
+
+============================================================
+TEST: TEXT_ONLY - Abstract Only
+============================================================
+Splits to load:  ['2020']
+Loading 2020 from local path
+Loaded 2020 of length 2198
+
+DEBUG: Processing dataset, type=<class 'datasets.arrow_dataset.Dataset'>, len=2198
+DEBUG: Got row with keys: ['submission_id', 'year', 'openreview_link', 'pdf_download_link', 'title']
+DEBUG: Got row with keys: ['submission_id', 'year', 'openreview_link', 'pdf_download_link', 'title']
+DEBUG: Got row with keys: ['submission_id', 'year', 'openreview_link', 'pdf_download_link', 'title']
+Loaded 3 submissions
+
+Sample prompt (first 500 chars):
+Based on the paper information provided, predict whether this paper will be accepted or rejected at ICLR.
+
+Provide your response in the following format:
+Reasoning: [Your reasoning about the paper's q...
+
+Input text (first 300 chars):
+# Learning to Learn by Zeroth-Order Oracle
+
+## Abstract
+In the learning to learn (L2L) framework, we cast the design of optimization algorithms as a machine learning problem and use deep neural networks to learn the update rules. In this paper, we extend the L2L framework to zeroth-order (ZO) optimi...
+INFO 12-24 22:59:55 [utils.py:253] non-default args: {'trust_remote_code': True, 'disable_log_stats': True, 'model': 'Qwen/Qwen2.5-0.5B-Instruct'}
+INFO 12-24 22:59:56 [model.py:631] Resolved architecture: Qwen2ForCausalLM
+INFO 12-24 22:59:56 [model.py:1745] Using max model len 32768
+INFO 12-24 22:59:56 [scheduler.py:216] Chunked prefill is enabled with max_num_batched_tokens=8192.
+[1;36m(EngineCore_DP0 pid=2787557)[0;0m INFO 12-24 22:59:57 [core.py:93] Initializing a V1 LLM engine (v0.11.2) with config: model='Qwen/Qwen2.5-0.5B-Instruct', speculative_config=None, tokenizer='Qwen/Qwen2.5-0.5B-Instruct', skip_tokenizer_init=False, tokenizer_mode=auto, revision=None, tokenizer_revision=None, trust_remote_code=True, dtype=torch.bfloat16, max_seq_len=32768, download_dir=None, load_format=auto, tensor_parallel_size=1, pipeline_parallel_size=1, data_parallel_size=1, disable_custom_all_reduce=False, quantization=None, enforce_eager=False, kv_cache_dtype=auto, device_config=cuda, structured_outputs_config=StructuredOutputsConfig(backend='auto', disable_fallback=False, disable_any_whitespace=False, disable_additional_properties=False, reasoning_parser='', reasoning_parser_plugin='', enable_in_reasoning=False), observability_config=ObservabilityConfig(show_hidden_metrics_for_version=None, otlp_traces_endpoint=None, collect_detailed_traces=None), seed=0, served_model_name=Qwen/Qwen2.5-0.5B-Instruct, enable_prefix_caching=True, enable_chunked_prefill=True, pooler_config=None, compilation_config={'level': None, 'mode': <CompilationMode.VLLM_COMPILE: 3>, 'debug_dump_path': None, 'cache_dir': '', 'compile_cache_save_format': 'binary', 'backend': 'inductor', 'custom_ops': ['none'], 'splitting_ops': ['vllm::unified_attention', 'vllm::unified_attention_with_output', 'vllm::unified_mla_attention', 'vllm::unified_mla_attention_with_output', 'vllm::mamba_mixer2', 'vllm::mamba_mixer', 'vllm::short_conv', 'vllm::linear_attention', 'vllm::plamo2_mamba_mixer', 'vllm::gdn_attention_core', 'vllm::kda_attention', 'vllm::sparse_attn_indexer'], 'compile_mm_encoder': False, 'use_inductor': None, 'compile_sizes': [], 'inductor_compile_config': {'enable_auto_functionalized_v2': False, 'combo_kernels': True, 'benchmark_combo_kernel': True}, 'inductor_passes': {}, 'cudagraph_mode': <CUDAGraphMode.FULL_AND_PIECEWISE: (2, 1)>, 'cudagraph_num_of_warmups': 1, 'cudagraph_capture_sizes': [1, 2, 4, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120, 128, 136, 144, 152, 160, 168, 176, 184, 192, 200, 208, 216, 224, 232, 240, 248, 256, 272, 288, 304, 320, 336, 352, 368, 384, 400, 416, 432, 448, 464, 480, 496, 512], 'cudagraph_copy_inputs': False, 'cudagraph_specialize_lora': True, 'use_inductor_graph_partition': False, 'pass_config': {}, 'max_cudagraph_capture_size': 512, 'local_cache_dir': None}
+[1;36m(EngineCore_DP0 pid=2787557)[0;0m INFO 12-24 22:59:58 [parallel_state.py:1208] world_size=1 rank=0 local_rank=0 distributed_init_method=tcp://172.17.32.103:52093 backend=nccl
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[1;36m(EngineCore_DP0 pid=2787557)[0;0m INFO 12-24 22:59:58 [parallel_state.py:1394] rank 0 in world size 1 is assigned as DP rank 0, PP rank 0, TP rank 0, EP rank 0
+[1;36m(EngineCore_DP0 pid=2787557)[0;0m INFO 12-24 22:59:59 [gpu_model_runner.py:3259] Starting to load model Qwen/Qwen2.5-0.5B-Instruct...
+[1;36m(EngineCore_DP0 pid=2787557)[0;0m INFO 12-24 22:59:59 [cuda.py:418] Valid backends: ['FLASH_ATTN', 'FLASHINFER', 'TRITON_ATTN', 'FLEX_ATTENTION']
+[1;36m(EngineCore_DP0 pid=2787557)[0;0m INFO 12-24 22:59:59 [cuda.py:427] Using FLASH_ATTN backend.
+[1;36m(EngineCore_DP0 pid=2787557)[0;0m INFO 12-24 23:00:00 [weight_utils.py:481] No model.safetensors.index.json found in remote.
+[1;36m(EngineCore_DP0 pid=2787557)[0;0m INFO 12-24 23:00:00 [default_loader.py:314] Loading weights took 0.20 seconds
+[1;36m(EngineCore_DP0 pid=2787557)[0;0m INFO 12-24 23:00:00 [gpu_model_runner.py:3338] Model loading took 0.9269 GiB memory and 0.874850 seconds
+[1;36m(EngineCore_DP0 pid=2787557)[0;0m INFO 12-24 23:00:06 [backends.py:631] Using cache directory: /n/fs/vision-mix/jl0796/vllm/torch_compile_cache/adbeadfbd0/rank_0_0/backbone for vLLM's torch.compile
+[1;36m(EngineCore_DP0 pid=2787557)[0;0m INFO 12-24 23:00:06 [backends.py:647] Dynamo bytecode transform time: 5.05 s
+[1;36m(EngineCore_DP0 pid=2787557)[0;0m INFO 12-24 23:00:08 [backends.py:210] Directly load the compiled graph(s) for dynamic shape from the cache, took 1.943 s
+[1;36m(EngineCore_DP0 pid=2787557)[0;0m INFO 12-24 23:00:09 [monitor.py:34] torch.compile takes 6.99 s in total
+[1;36m(EngineCore_DP0 pid=2787557)[0;0m INFO 12-24 23:00:10 [gpu_worker.py:359] Available KV cache memory: 37.59 GiB
+[1;36m(EngineCore_DP0 pid=2787557)[0;0m INFO 12-24 23:00:10 [kv_cache_utils.py:1229] GPU KV cache size: 3,284,656 tokens
+[1;36m(EngineCore_DP0 pid=2787557)[0;0m INFO 12-24 23:00:10 [kv_cache_utils.py:1234] Maximum concurrency for 32,768 tokens per request: 100.24x
+[1;36m(EngineCore_DP0 pid=2787557)[0;0m INFO 12-24 23:00:13 [gpu_model_runner.py:4244] Graph capturing finished in 3 secs, took 0.46 GiB
+[1;36m(EngineCore_DP0 pid=2787557)[0;0m INFO 12-24 23:00:13 [core.py:250] init engine (profile, create kv cache, warmup model) took 12.69 seconds
+INFO 12-24 23:00:14 [llm.py:352] Supported tasks: ['generate']
+
+--- Result 0 ---
+Prediction: Accept
+Raw (first 150 chars): Reasoning: The paper presents a novel approach to zeroth-order (ZO) optimization, which is a significant advancement in the field of machine learning.
+
+--- Result 1 ---
+Prediction: Accept
+Raw (first 150 chars): Reasoning: The paper presents a novel approach to transfer learning that adjusts the strength of regularization and dynamically selects important feat
+
+--- Result 2 ---
+Prediction: Accept
+Raw (first 150 chars): Reasoning: The paper presents a novel approach to model quantum experiments using long short-term memory (LSTM) neural networks. The authors demonstra
+
+============================================================
+TEST: TEXT_ONLY - Abstract + Reviews
+============================================================
+Splits to load:  ['2020']
+Loading 2020 from local path
+Loaded 2020 of length 2198
+
+DEBUG: Processing dataset, type=<class 'datasets.arrow_dataset.Dataset'>, len=2198
+DEBUG: Got row with keys: ['submission_id', 'year', 'openreview_link', 'pdf_download_link', 'title']
+DEBUG: Got row with keys: ['submission_id', 'year', 'openreview_link', 'pdf_download_link', 'title']
+DEBUG: Got row with keys: ['submission_id', 'year', 'openreview_link', 'pdf_download_link', 'title']
+Loaded 3 submissions
+
+Sample has reviews: 3 reviews
+Input text length: 6946 chars
+INFO 12-24 23:00:15 [utils.py:253] non-default args: {'trust_remote_code': True, 'disable_log_stats': True, 'model': 'Qwen/Qwen2.5-0.5B-Instruct'}
+INFO 12-24 23:00:15 [model.py:631] Resolved architecture: Qwen2ForCausalLM
+INFO 12-24 23:00:15 [model.py:1745] Using max model len 32768
+INFO 12-24 23:00:15 [scheduler.py:216] Chunked prefill is enabled with max_num_batched_tokens=8192.
+[1;36m(EngineCore_DP0 pid=2787672)[0;0m INFO 12-24 23:00:16 [core.py:93] Initializing a V1 LLM engine (v0.11.2) with config: model='Qwen/Qwen2.5-0.5B-Instruct', speculative_config=None, tokenizer='Qwen/Qwen2.5-0.5B-Instruct', skip_tokenizer_init=False, tokenizer_mode=auto, revision=None, tokenizer_revision=None, trust_remote_code=True, dtype=torch.bfloat16, max_seq_len=32768, download_dir=None, load_format=auto, tensor_parallel_size=1, pipeline_parallel_size=1, data_parallel_size=1, disable_custom_all_reduce=False, quantization=None, enforce_eager=False, kv_cache_dtype=auto, device_config=cuda, structured_outputs_config=StructuredOutputsConfig(backend='auto', disable_fallback=False, disable_any_whitespace=False, disable_additional_properties=False, reasoning_parser='', reasoning_parser_plugin='', enable_in_reasoning=False), observability_config=ObservabilityConfig(show_hidden_metrics_for_version=None, otlp_traces_endpoint=None, collect_detailed_traces=None), seed=0, served_model_name=Qwen/Qwen2.5-0.5B-Instruct, enable_prefix_caching=True, enable_chunked_prefill=True, pooler_config=None, compilation_config={'level': None, 'mode': <CompilationMode.VLLM_COMPILE: 3>, 'debug_dump_path': None, 'cache_dir': '', 'compile_cache_save_format': 'binary', 'backend': 'inductor', 'custom_ops': ['none'], 'splitting_ops': ['vllm::unified_attention', 'vllm::unified_attention_with_output', 'vllm::unified_mla_attention', 'vllm::unified_mla_attention_with_output', 'vllm::mamba_mixer2', 'vllm::mamba_mixer', 'vllm::short_conv', 'vllm::linear_attention', 'vllm::plamo2_mamba_mixer', 'vllm::gdn_attention_core', 'vllm::kda_attention', 'vllm::sparse_attn_indexer'], 'compile_mm_encoder': False, 'use_inductor': None, 'compile_sizes': [], 'inductor_compile_config': {'enable_auto_functionalized_v2': False, 'combo_kernels': True, 'benchmark_combo_kernel': True}, 'inductor_passes': {}, 'cudagraph_mode': <CUDAGraphMode.FULL_AND_PIECEWISE: (2, 1)>, 'cudagraph_num_of_warmups': 1, 'cudagraph_capture_sizes': [1, 2, 4, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120, 128, 136, 144, 152, 160, 168, 176, 184, 192, 200, 208, 216, 224, 232, 240, 248, 256, 272, 288, 304, 320, 336, 352, 368, 384, 400, 416, 432, 448, 464, 480, 496, 512], 'cudagraph_copy_inputs': False, 'cudagraph_specialize_lora': True, 'use_inductor_graph_partition': False, 'pass_config': {}, 'max_cudagraph_capture_size': 512, 'local_cache_dir': None}
+[1;36m(EngineCore_DP0 pid=2787672)[0;0m INFO 12-24 23:00:17 [parallel_state.py:1208] world_size=1 rank=0 local_rank=0 distributed_init_method=tcp://172.17.32.103:58481 backend=nccl
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[1;36m(EngineCore_DP0 pid=2787672)[0;0m INFO 12-24 23:00:17 [parallel_state.py:1394] rank 0 in world size 1 is assigned as DP rank 0, PP rank 0, TP rank 0, EP rank 0
+[1;36m(EngineCore_DP0 pid=2787672)[0;0m INFO 12-24 23:00:17 [gpu_model_runner.py:3259] Starting to load model Qwen/Qwen2.5-0.5B-Instruct...
+[1;36m(EngineCore_DP0 pid=2787672)[0;0m INFO 12-24 23:00:18 [cuda.py:418] Valid backends: ['FLASH_ATTN', 'FLASHINFER', 'TRITON_ATTN', 'FLEX_ATTENTION']
+[1;36m(EngineCore_DP0 pid=2787672)[0;0m INFO 12-24 23:00:18 [cuda.py:427] Using FLASH_ATTN backend.
+[1;36m(EngineCore_DP0 pid=2787672)[0;0m INFO 12-24 23:00:18 [weight_utils.py:481] No model.safetensors.index.json found in remote.
+[1;36m(EngineCore_DP0 pid=2787672)[0;0m INFO 12-24 23:00:18 [default_loader.py:314] Loading weights took 0.20 seconds
+[1;36m(EngineCore_DP0 pid=2787672)[0;0m INFO 12-24 23:00:19 [gpu_model_runner.py:3338] Model loading took 0.9269 GiB memory and 0.931098 seconds
+[1;36m(EngineCore_DP0 pid=2787672)[0;0m INFO 12-24 23:00:24 [backends.py:631] Using cache directory: /n/fs/vision-mix/jl0796/vllm/torch_compile_cache/adbeadfbd0/rank_0_0/backbone for vLLM's torch.compile
+[1;36m(EngineCore_DP0 pid=2787672)[0;0m INFO 12-24 23:00:24 [backends.py:647] Dynamo bytecode transform time: 4.87 s
+[1;36m(EngineCore_DP0 pid=2787672)[0;0m INFO 12-24 23:00:26 [backends.py:210] Directly load the compiled graph(s) for dynamic shape from the cache, took 1.861 s
+[1;36m(EngineCore_DP0 pid=2787672)[0;0m INFO 12-24 23:00:27 [monitor.py:34] torch.compile takes 6.73 s in total
+[1;36m(EngineCore_DP0 pid=2787672)[0;0m INFO 12-24 23:00:28 [gpu_worker.py:359] Available KV cache memory: 37.59 GiB
+[1;36m(EngineCore_DP0 pid=2787672)[0;0m INFO 12-24 23:00:28 [kv_cache_utils.py:1229] GPU KV cache size: 3,284,656 tokens
+[1;36m(EngineCore_DP0 pid=2787672)[0;0m INFO 12-24 23:00:28 [kv_cache_utils.py:1234] Maximum concurrency for 32,768 tokens per request: 100.24x
+[1;36m(EngineCore_DP0 pid=2787672)[0;0m INFO 12-24 23:00:31 [gpu_model_runner.py:4244] Graph capturing finished in 3 secs, took 0.46 GiB
+[1;36m(EngineCore_DP0 pid=2787672)[0;0m INFO 12-24 23:00:31 [core.py:250] init engine (profile, create kv cache, warmup model) took 12.42 seconds
+INFO 12-24 23:00:32 [llm.py:352] Supported tasks: ['generate']
+
+--- Result 0 ---
+Prediction: Accept
+Raw (first 150 chars): Reasoning: The paper presents a novel zeroth-order optimization framework for learning to learn, which is a significant advancement in the field of ma
+
+--- Result 1 ---
+Prediction: Accept
+Raw (first 150 chars): Reasoning: The paper presents a novel approach to transfer learning that uses attentive feature selection and selective feature distillation to improv
+
+--- Result 2 ---
+Prediction: Accept
+Raw (first 150 chars): Reasoning: The paper presents a novel approach to predicting quantum optical experiments using long short-term memory (LSTM) networks. The authors sho
+
+============================================================
+TEST: TEXT_ONLY - Full Context (Abstract + Reviews + Markdown)
+============================================================
+Splits to load:  ['2020']
+Loading 2020 from local path
+Loaded 2020 of length 2198
+
+DEBUG: Processing dataset, type=<class 'datasets.arrow_dataset.Dataset'>, len=2198
+DEBUG: Got row with keys: ['submission_id', 'year', 'openreview_link', 'pdf_download_link', 'title']
+DEBUG: Got row with keys: ['submission_id', 'year', 'openreview_link', 'pdf_download_link', 'title']
+DEBUG: Got row with keys: ['submission_id', 'year', 'openreview_link', 'pdf_download_link', 'title']
+Loaded 3 submissions
+
+Sample has markdown: True
+Input text length: 28054 chars
+INFO 12-24 23:00:33 [utils.py:253] non-default args: {'trust_remote_code': True, 'disable_log_stats': True, 'model': 'Qwen/Qwen2.5-0.5B-Instruct'}
+INFO 12-24 23:00:34 [model.py:631] Resolved architecture: Qwen2ForCausalLM
+INFO 12-24 23:00:34 [model.py:1745] Using max model len 32768
+INFO 12-24 23:00:34 [scheduler.py:216] Chunked prefill is enabled with max_num_batched_tokens=8192.
+[1;36m(EngineCore_DP0 pid=2787785)[0;0m INFO 12-24 23:00:34 [core.py:93] Initializing a V1 LLM engine (v0.11.2) with config: model='Qwen/Qwen2.5-0.5B-Instruct', speculative_config=None, tokenizer='Qwen/Qwen2.5-0.5B-Instruct', skip_tokenizer_init=False, tokenizer_mode=auto, revision=None, tokenizer_revision=None, trust_remote_code=True, dtype=torch.bfloat16, max_seq_len=32768, download_dir=None, load_format=auto, tensor_parallel_size=1, pipeline_parallel_size=1, data_parallel_size=1, disable_custom_all_reduce=False, quantization=None, enforce_eager=False, kv_cache_dtype=auto, device_config=cuda, structured_outputs_config=StructuredOutputsConfig(backend='auto', disable_fallback=False, disable_any_whitespace=False, disable_additional_properties=False, reasoning_parser='', reasoning_parser_plugin='', enable_in_reasoning=False), observability_config=ObservabilityConfig(show_hidden_metrics_for_version=None, otlp_traces_endpoint=None, collect_detailed_traces=None), seed=0, served_model_name=Qwen/Qwen2.5-0.5B-Instruct, enable_prefix_caching=True, enable_chunked_prefill=True, pooler_config=None, compilation_config={'level': None, 'mode': <CompilationMode.VLLM_COMPILE: 3>, 'debug_dump_path': None, 'cache_dir': '', 'compile_cache_save_format': 'binary', 'backend': 'inductor', 'custom_ops': ['none'], 'splitting_ops': ['vllm::unified_attention', 'vllm::unified_attention_with_output', 'vllm::unified_mla_attention', 'vllm::unified_mla_attention_with_output', 'vllm::mamba_mixer2', 'vllm::mamba_mixer', 'vllm::short_conv', 'vllm::linear_attention', 'vllm::plamo2_mamba_mixer', 'vllm::gdn_attention_core', 'vllm::kda_attention', 'vllm::sparse_attn_indexer'], 'compile_mm_encoder': False, 'use_inductor': None, 'compile_sizes': [], 'inductor_compile_config': {'enable_auto_functionalized_v2': False, 'combo_kernels': True, 'benchmark_combo_kernel': True}, 'inductor_passes': {}, 'cudagraph_mode': <CUDAGraphMode.FULL_AND_PIECEWISE: (2, 1)>, 'cudagraph_num_of_warmups': 1, 'cudagraph_capture_sizes': [1, 2, 4, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120, 128, 136, 144, 152, 160, 168, 176, 184, 192, 200, 208, 216, 224, 232, 240, 248, 256, 272, 288, 304, 320, 336, 352, 368, 384, 400, 416, 432, 448, 464, 480, 496, 512], 'cudagraph_copy_inputs': False, 'cudagraph_specialize_lora': True, 'use_inductor_graph_partition': False, 'pass_config': {}, 'max_cudagraph_capture_size': 512, 'local_cache_dir': None}
+[1;36m(EngineCore_DP0 pid=2787785)[0;0m INFO 12-24 23:00:35 [parallel_state.py:1208] world_size=1 rank=0 local_rank=0 distributed_init_method=tcp://172.17.32.103:50183 backend=nccl
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[1;36m(EngineCore_DP0 pid=2787785)[0;0m INFO 12-24 23:00:35 [parallel_state.py:1394] rank 0 in world size 1 is assigned as DP rank 0, PP rank 0, TP rank 0, EP rank 0
+[1;36m(EngineCore_DP0 pid=2787785)[0;0m INFO 12-24 23:00:36 [gpu_model_runner.py:3259] Starting to load model Qwen/Qwen2.5-0.5B-Instruct...
+[1;36m(EngineCore_DP0 pid=2787785)[0;0m INFO 12-24 23:00:36 [cuda.py:418] Valid backends: ['FLASH_ATTN', 'FLASHINFER', 'TRITON_ATTN', 'FLEX_ATTENTION']
+[1;36m(EngineCore_DP0 pid=2787785)[0;0m INFO 12-24 23:00:36 [cuda.py:427] Using FLASH_ATTN backend.
+[1;36m(EngineCore_DP0 pid=2787785)[0;0m INFO 12-24 23:00:37 [weight_utils.py:481] No model.safetensors.index.json found in remote.
+[1;36m(EngineCore_DP0 pid=2787785)[0;0m INFO 12-24 23:00:37 [default_loader.py:314] Loading weights took 0.20 seconds
+[1;36m(EngineCore_DP0 pid=2787785)[0;0m INFO 12-24 23:00:38 [gpu_model_runner.py:3338] Model loading took 0.9269 GiB memory and 1.234121 seconds
+[1;36m(EngineCore_DP0 pid=2787785)[0;0m INFO 12-24 23:00:43 [backends.py:631] Using cache directory: /n/fs/vision-mix/jl0796/vllm/torch_compile_cache/adbeadfbd0/rank_0_0/backbone for vLLM's torch.compile
+[1;36m(EngineCore_DP0 pid=2787785)[0;0m INFO 12-24 23:00:43 [backends.py:647] Dynamo bytecode transform time: 5.05 s
+[1;36m(EngineCore_DP0 pid=2787785)[0;0m INFO 12-24 23:00:45 [backends.py:210] Directly load the compiled graph(s) for dynamic shape from the cache, took 1.831 s
+[1;36m(EngineCore_DP0 pid=2787785)[0;0m INFO 12-24 23:00:46 [monitor.py:34] torch.compile takes 6.88 s in total
+[1;36m(EngineCore_DP0 pid=2787785)[0;0m INFO 12-24 23:00:47 [gpu_worker.py:359] Available KV cache memory: 37.59 GiB
+[1;36m(EngineCore_DP0 pid=2787785)[0;0m INFO 12-24 23:00:47 [kv_cache_utils.py:1229] GPU KV cache size: 3,284,656 tokens
+[1;36m(EngineCore_DP0 pid=2787785)[0;0m INFO 12-24 23:00:47 [kv_cache_utils.py:1234] Maximum concurrency for 32,768 tokens per request: 100.24x
+[1;36m(EngineCore_DP0 pid=2787785)[0;0m INFO 12-24 23:00:50 [gpu_model_runner.py:4244] Graph capturing finished in 3 secs, took 0.46 GiB
+[1;36m(EngineCore_DP0 pid=2787785)[0;0m INFO 12-24 23:00:50 [core.py:250] init engine (profile, create kv cache, warmup model) took 12.69 seconds
+INFO 12-24 23:00:51 [llm.py:352] Supported tasks: ['generate']
+
+--- Result 0 ---
+Prediction: Accept
+Raw (first 150 chars): ### Reasoning: The paper's quality, novelty, significance, and fit for the conference
+**Accept**
+
+### Reasoning: The paper's quality, novelty, signifi
+
+--- Result 1 ---
+Prediction: Accept
+Raw (first 150 chars): ### Reasoning: The paper presents a method called attentive feature distillation and selection (AFDS) to improve the performance of transfer learning 
+
+--- Result 2 ---
+Prediction: Accept
+Raw (first 150 chars): Reasoning: The paper presents a novel approach to predicting quantum states using long short-term memory (LSTM) networks. The authors demonstrate that
+
+============================================================
+SKIPPED: Vision tests (use --with-images to enable)
+============================================================
+
+============================================================
+ALL TESTS COMPLETED
+============================================================

@@ -10,9 +10,11 @@ from lib.llamafactory import (
 from lib.llamafactory.training.base import build_prompt
 
 # Load a few submissions from all splits
+# Use local path to downloaded HuggingFace dataset
+LOCAL_DATASET_PATH = "/n/fs/vision-mix/jl0796/iclr-reviews-2020-2026"
 loader = ICLRDataLoader()
 subs = []
-for i, s in enumerate(loader.load_from_huggingface(years=["2020"], load_images=False)):
+for i, s in enumerate(loader.load_from_huggingface(dataset_name=LOCAL_DATASET_PATH, years=["2020"], load_images=False)):
     subs.append(s)
     if i >= 4:
         break

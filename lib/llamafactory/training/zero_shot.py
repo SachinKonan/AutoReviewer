@@ -11,6 +11,7 @@ from ..core.registry import register_training_mode
 from ..core.types import (
     FormattedSample,
     InferenceConfig,
+    ModelType,
     TrainingConfig,
     TrainingMode,
 )
@@ -82,13 +83,31 @@ class ZeroShotMode(TrainingModeBase):
             "message": "Zero-shot mode does not require training",
         }
 
+    def _is_vision_model(self, model_name: str) -> bool:
+        """Check if model is a vision-language model."""
+        vl_indicators = ["vl", "vision", "VL", "Vision"]
+        return any(ind in model_name for ind in vl_indicators)
+
     def predict(
         self,
         samples: List[FormattedSample],
         inference_config: InferenceConfig,
     ) -> List[Dict[str, Any]]:
         """Run zero-shot inference."""
-        if self.use_vllm:
+        model_name = inference_config.model_name_or_path or self.config.get_model_name()
+        is_vl = (
+            self.config.model_type == ModelType.VISION_LANGUAGE
+            or self._is_vision_model(model_name)
+        )
+
+        # vLLM has compatibility issues with some VL models (flash attention)
+        # Fall back to transformers for VL models
+        use_vllm = self.use_vllm and not is_vl
+
+        if is_vl and self.use_vllm:
+            print("Note: Using transformers backend for VL model (vLLM has compatibility issues)")
+
+        if use_vllm:
             return self._predict_vllm(samples, inference_config)
         else:
             return self._predict_transformers(samples, inference_config)
@@ -100,6 +119,7 @@ class ZeroShotMode(TrainingModeBase):
     ) -> List[Dict[str, Any]]:
         """Run inference using vLLM."""
         from vllm import LLM, SamplingParams
+        from transformers import AutoTokenizer
 
         # Initialize model if needed
         model_name = inference_config.model_name_or_path or self.config.get_model_name()
@@ -111,14 +131,25 @@ class ZeroShotMode(TrainingModeBase):
             gpu_memory_utilization=inference_config.gpu_memory_utilization,
         )
 
+        # Load tokenizer for chat template
+        tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+
         sampling_params = SamplingParams(
             temperature=inference_config.temperature,
             max_tokens=inference_config.max_tokens,
             stop=None,
         )
 
-        # Build prompts
-        prompts = [build_prompt(sample) for sample in samples]
+        # Build prompts with chat template
+        prompts = []
+        for sample in samples:
+            messages = [{"role": "user", "content": build_prompt(sample)}]
+            text = tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+            prompts.append(text)
 
         # Run inference
         outputs = llm.generate(prompts, sampling_params)
@@ -140,6 +171,23 @@ class ZeroShotMode(TrainingModeBase):
         inference_config: InferenceConfig,
     ) -> List[Dict[str, Any]]:
         """Run inference using HuggingFace transformers."""
+        model_name = inference_config.model_name_or_path or self.config.get_model_name()
+        is_vl = (
+            self.config.model_type == ModelType.VISION_LANGUAGE
+            or self._is_vision_model(model_name)
+        )
+
+        if is_vl:
+            return self._predict_transformers_vl(samples, inference_config)
+        else:
+            return self._predict_transformers_text(samples, inference_config)
+
+    def _predict_transformers_text(
+        self,
+        samples: List[FormattedSample],
+        inference_config: InferenceConfig,
+    ) -> List[Dict[str, Any]]:
+        """Run inference using HuggingFace transformers for text-only models."""
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -151,6 +199,9 @@ class ZeroShotMode(TrainingModeBase):
                 model_name,
                 trust_remote_code=True,
             )
+            # Ensure pad token is set
+            if self._tokenizer.pad_token is None:
+                self._tokenizer.pad_token = self._tokenizer.eos_token
             self._model = AutoModelForCausalLM.from_pretrained(
                 model_name,
                 torch_dtype=torch.bfloat16,
@@ -163,11 +214,23 @@ class ZeroShotMode(TrainingModeBase):
 
         for i in range(0, len(samples), batch_size):
             batch_samples = samples[i:i + batch_size]
-            prompts = [build_prompt(s) for s in batch_samples]
+
+            # Build chat messages and apply chat template for instruct models
+            batch_inputs = []
+            for s in batch_samples:
+                messages = [
+                    {"role": "user", "content": build_prompt(s)}
+                ]
+                text = self._tokenizer.apply_chat_template(
+                    messages,
+                    tokenize=False,
+                    add_generation_prompt=True,
+                )
+                batch_inputs.append(text)
 
             # Tokenize
             inputs = self._tokenizer(
-                prompts,
+                batch_inputs,
                 return_tensors="pt",
                 padding=True,
                 truncation=True,
@@ -195,6 +258,101 @@ class ZeroShotMode(TrainingModeBase):
                 parsed["submission_id"] = sample.submission_id
                 parsed["year"] = sample.year
                 results.append(parsed)
+
+        return results
+
+    def _predict_transformers_vl(
+        self,
+        samples: List[FormattedSample],
+        inference_config: InferenceConfig,
+    ) -> List[Dict[str, Any]]:
+        """Run inference using HuggingFace transformers for vision-language models."""
+        import torch
+        from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor
+        from qwen_vl_utils import process_vision_info
+
+        model_name = inference_config.model_name_or_path or self.config.get_model_name()
+
+        # Load model and processor (VL models use processor instead of tokenizer)
+        if self._model is None:
+            print(f"Loading VL model: {model_name}")
+            self._tokenizer = AutoProcessor.from_pretrained(
+                model_name,
+                trust_remote_code=True,
+            )
+            self._model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+                model_name,
+                torch_dtype=torch.bfloat16,
+                device_map="auto",
+                trust_remote_code=True,
+            )
+            print("VL model loaded successfully")
+
+        results = []
+
+        # Process one sample at a time for VL models (images make batching complex)
+        for sample in samples:
+            # Build message with images
+            content = []
+
+            # Add images if present
+            if sample.images:
+                for img_path in sample.images:
+                    content.append({
+                        "type": "image",
+                        "image": f"file://{img_path}",
+                    })
+
+            # Add text
+            content.append({
+                "type": "text",
+                "text": build_prompt(sample),
+            })
+
+            messages = [{"role": "user", "content": content}]
+
+            # Apply chat template
+            text = self._tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+
+            # Process vision info (handles image loading and preprocessing)
+            image_inputs, video_inputs = process_vision_info(messages)
+
+            # Tokenize with images
+            inputs = self._tokenizer(
+                text=[text],
+                images=image_inputs,
+                videos=video_inputs,
+                padding=True,
+                return_tensors="pt",
+            ).to(self._model.device)
+
+            # Generate
+            with torch.no_grad():
+                output_ids = self._model.generate(
+                    **inputs,
+                    max_new_tokens=inference_config.max_tokens,
+                    temperature=inference_config.temperature if inference_config.temperature > 0 else None,
+                    do_sample=inference_config.temperature > 0,
+                )
+
+            # Decode - get only generated tokens
+            generated_ids = [
+                output_ids[0][len(inputs.input_ids[0]):]
+            ]
+            generated_text = self._tokenizer.batch_decode(
+                generated_ids,
+                skip_special_tokens=True,
+                clean_up_tokenization_spaces=False,
+            )[0]
+
+            parsed = self.output_handler.parse_prediction(generated_text)
+            parsed["submission_id"] = sample.submission_id
+            parsed["year"] = sample.year
+            results.append(parsed)
 
         return results
 
