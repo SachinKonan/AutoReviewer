@@ -6,3 +6,7 @@ MinerU/
 scripts/__pycache__/
 lib/**/__pycache__/
 outputs/
+wandb/
+.vscode/
+.claude/
+experiments/__pycache__/
