@@ -9,6 +9,7 @@ Replaces UnifiedPredictor with a streaming architecture that:
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -75,7 +76,10 @@ class RayDataPredictor:
         Initialize Ray Data predictor.
 
         Args:
-            input_modality: Input content type (TEXT_ONLY, TEXT_WITH_IMAGES, etc.)
+            input_modality: Input content type
+                - TEXT_ONLY: title + abstract + clean_md (text only)
+                - TEXT_WITH_IMAGES: title + abstract + clean_md with inline images
+                - IMAGES_ONLY: PDF page images
             output_type: Prediction output type (BINARY, MULTICLASS, MEAN_RATING)
             model_name: HuggingFace model name or path
             ray_address: Ray cluster address (None for local)
@@ -87,8 +91,8 @@ class RayDataPredictor:
             n: Number of completions per request
             max_input_tokens: Maximum tokens for input content
             include_reviews: Whether to include reviewer feedback
-            include_markdown: Whether to include paper markdown
-            max_images: Maximum PDF page images to include
+            include_markdown: Whether to include paper markdown (TEXT_ONLY)
+            max_images: Maximum images (PDF pages for IMAGES_ONLY)
             include_reasoning: Whether to request reasoning in output
         """
         self.input_modality = input_modality
@@ -104,14 +108,28 @@ class RayDataPredictor:
         self.max_tokens = max_tokens
         self.n = n
 
-        # Create input formatter
-        input_formatter_cls = get_input_formatter(input_modality)
-        self.input_formatter = input_formatter_cls(
-            max_tokens=max_input_tokens,
-            include_reviews=include_reviews,
-            include_markdown=include_markdown,
-            max_images=max_images,
-        )
+        # Create input formatter based on modality
+        if input_modality == InputModality.TEXT_WITH_IMAGES:
+            # TEXT_WITH_IMAGES: Use markdown with inline image references
+            from ..inputs.text_with_images import MarkdownWithInlineImagesFormatter
+            self.input_formatter = MarkdownWithInlineImagesFormatter(
+                max_tokens=max_input_tokens,
+                include_reviews=include_reviews,
+            )
+        elif input_modality == InputModality.IMAGES_ONLY:
+            # IMAGES_ONLY: Use PDF page images
+            from ..inputs.images_only import ImagesOnlyFormatter
+            self.input_formatter = ImagesOnlyFormatter(
+                max_images=max_images,
+            )
+        else:
+            # TEXT_ONLY: Use text-only formatter
+            from ..inputs.text_only import FullContextFormatter
+            self.input_formatter = FullContextFormatter(
+                max_tokens=max_input_tokens,
+                include_reviews=include_reviews,
+                include_markdown=include_markdown,
+            )
 
         # Create output handler
         output_handler_cls = get_output_handler(output_type)
@@ -121,6 +139,11 @@ class RayDataPredictor:
 
         # Check if VL model needed
         self.is_vl_model = self.input_formatter.requires_vl_model
+
+    def _extract_page_num(self, path: Path) -> int:
+        """Extract page number from path like page_1.png, page_10.png, etc."""
+        match = re.search(r'page_(\d+)', str(path))
+        return int(match.group(1)) if match else 0
 
     def _init_ray(self) -> None:
         """Initialize Ray connection."""
@@ -163,24 +186,43 @@ class RayDataPredictor:
             except (json.JSONDecodeError, TypeError):
                 pass
 
-        # Parse reviews
+        # Parse reviews - handles nested JSON (list of JSON strings)
         reviews = []
         if row.get("normalized_reviews"):
             try:
                 reviews_data = json.loads(row["normalized_reviews"])
                 if isinstance(reviews_data, list):
                     for r in reviews_data:
+                        # Each item might be a JSON string or a dict
+                        if isinstance(r, str):
+                            try:
+                                r = json.loads(r)
+                            except (json.JSONDecodeError, TypeError):
+                                continue
                         if isinstance(r, dict):
                             reviews.append(ReviewData.from_normalized(r))
             except (json.JSONDecodeError, TypeError):
                 pass
 
-        # Get image paths
+        # Get image paths - handles both clean_pdf_img_paths (JSON list) and pdf_image_dir
         pdf_image_paths = []
-        if row.get("pdf_image_dir"):
+        if row.get("clean_pdf_img_paths"):
+            try:
+                # Parse JSON string to list of paths
+                paths_data = row["clean_pdf_img_paths"]
+                if isinstance(paths_data, str):
+                    paths_data = json.loads(paths_data)
+                if isinstance(paths_data, list):
+                    pdf_image_paths = [Path(p) for p in paths_data if p]
+                    # Sort by page number (page_1, page_2, ..., page_10, page_11)
+                    pdf_image_paths = sorted(pdf_image_paths, key=self._extract_page_num)
+            except (json.JSONDecodeError, TypeError):
+                pass
+        elif row.get("pdf_image_dir"):
             img_dir = Path(row["pdf_image_dir"])
             if img_dir.exists():
-                pdf_image_paths = sorted(img_dir.glob("page_*.png"))
+                # Sort by page number numerically
+                pdf_image_paths = sorted(img_dir.glob("page_*.png"), key=self._extract_page_num)
 
         return SubmissionData(
             submission_id=str(row.get("submission_id", "")),
@@ -207,18 +249,95 @@ class RayDataPredictor:
         self,
         prompt: str,
         image_paths: Optional[List[str]],
+        images_in_md: Optional[Dict[str, str]] = None,
     ) -> List[Dict[str, Any]]:
-        """Build messages for vLLM, handling images for VL models."""
-        if not image_paths:
+        """Build messages for vLLM, handling images for VL models.
+
+        For TEXT_WITH_IMAGES modality, parses markdown for ![](images/...)
+        patterns and inserts images inline (interleaved with text).
+
+        Args:
+            prompt: The text prompt (may contain markdown image refs)
+            image_paths: List of image paths (for non-inline images)
+            images_in_md: Mapping from image filename to full path
+        """
+        if not image_paths and not images_in_md:
             return [{"role": "user", "content": prompt}]
 
-        # VL model format (Qwen2.5-VL style)
+        # Check if we should do inline image insertion
+        if images_in_md and "![" in prompt:
+            return self._build_inline_image_messages(prompt, images_in_md)
+
+        # Fallback: all images at the start, then text
         content = []
-        for path in image_paths:
-            content.append({"type": "image", "image": f"file://{path}"})
+        if image_paths:
+            for path in image_paths:
+                content.append({"type": "image", "image": f"file://{path}"})
         content.append({"type": "text", "text": prompt})
 
         return [{"role": "user", "content": content}]
+
+    def _build_inline_image_messages(
+        self,
+        prompt: str,
+        images_in_md: Dict[str, str],
+    ) -> List[Dict[str, Any]]:
+        """Build messages with inline images parsed from markdown.
+
+        Parses ![](images/filename.ext) or ![...](images/filename.ext) patterns
+        and replaces them with actual image content, creating interleaved
+        text/image content.
+        """
+        # Pattern to match markdown images: ![alt](images/filename.ext)
+        # Also matches ![](images/...) with empty alt text
+        pattern = r'!\[[^\]]*\]\(images/([^)]+)\)'
+
+        content = []
+        last_end = 0
+
+        for match in re.finditer(pattern, prompt):
+            # Add text before this image
+            text_before = prompt[last_end:match.start()].strip()
+            if text_before:
+                content.append({"type": "text", "text": text_before})
+
+            # Get the image filename and look up full path
+            image_filename = match.group(1)
+            image_path = images_in_md.get(image_filename)
+
+            if image_path and Path(image_path).exists():
+                content.append({"type": "image", "image": f"file://{image_path}"})
+            else:
+                # Image not found, keep the markdown reference as text
+                content.append({"type": "text", "text": match.group(0)})
+
+            last_end = match.end()
+
+        # Add remaining text after the last image
+        text_after = prompt[last_end:].strip()
+        if text_after:
+            content.append({"type": "text", "text": text_after})
+
+        # If no content was added (no images found), just return text
+        if not content:
+            return [{"role": "user", "content": prompt}]
+
+        return [{"role": "user", "content": content}]
+
+    def _parse_images_in_md(self, row: Dict[str, Any]) -> Optional[Dict[str, str]]:
+        """Parse images_in_clean_md column to get filename->path mapping."""
+        if not row.get("images_in_clean_md"):
+            return None
+
+        try:
+            data = row["images_in_clean_md"]
+            if isinstance(data, str):
+                data = json.loads(data)
+            if isinstance(data, dict):
+                return data
+        except (json.JSONDecodeError, TypeError):
+            pass
+        return None
 
     def preprocess(self, row: Dict[str, Any]) -> Dict[str, Any]:
         """Convert dataset row to vLLM messages format."""
@@ -233,8 +352,13 @@ class RayDataPredictor:
         # Get image paths (not loaded - just paths)
         images = self.input_formatter.get_images(submission)
 
-        # Build messages
-        messages = self._build_messages(prompt, images)
+        # Get inline image mapping ONLY for TEXT_WITH_IMAGES modality
+        images_in_md = None
+        if self.input_modality == InputModality.TEXT_WITH_IMAGES:
+            images_in_md = self._parse_images_in_md(row)
+
+        # Build messages (with inline image support for TEXT_WITH_IMAGES)
+        messages = self._build_messages(prompt, images, images_in_md)
 
         return {
             "messages": messages,

@@ -5,3 +5,4 @@ lib/__pycache__/
 MinerU/
 scripts/__pycache__/
 lib/**/__pycache__/
+outputs/

@@ -80,6 +80,7 @@ from .inputs.text_with_images import (
     AbstractWithPageImagesFormatter,
     ReviewsWithPageImagesFormatter,
     KeyPagesFormatter,
+    MarkdownWithInlineImagesFormatter,
 )
 from .inputs.images_only import (
     ImagesOnlyFormatter,
@@ -150,6 +151,7 @@ __all__ = [
     "AbstractWithPageImagesFormatter",
     "ReviewsWithPageImagesFormatter",
     "KeyPagesFormatter",
+    "MarkdownWithInlineImagesFormatter",
     "ImagesOnlyFormatter",
     "ImagesWithTitleFormatter",
     # Output handlers

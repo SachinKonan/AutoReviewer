@@ -166,3 +166,60 @@ class KeyPagesFormatter(TextWithImagesFormatter):
         selected.extend(paths[-self.last_pages:])
 
         return [str(p) for p in selected]
+
+
+class MarkdownWithInlineImagesFormatter(InputFormatter):
+    """
+    Format with markdown content containing inline image references.
+
+    Uses clean_md (markdown with ![](images/...) references) which are
+    resolved to actual images at inference time. Images are interleaved
+    with text based on their position in the markdown.
+
+    This requires a vision-language model and the images_in_clean_md
+    column in the dataset to resolve image references to paths.
+    """
+
+    modality = InputModality.TEXT_WITH_IMAGES
+    requires_vl_model = True
+
+    def format_content(self, submission: SubmissionData) -> str:
+        """Format submission content with markdown (preserving image refs)."""
+        parts = []
+
+        # Title and abstract
+        parts.append(f"# {submission.title}")
+        parts.append(f"\n## Abstract\n{submission.abstract}")
+
+        # Reviews if available and requested
+        if self.include_reviews and submission.reviews:
+            parts.append("\n## Reviews")
+            reviews_text = self._format_reviews(submission.reviews)
+            parts.append(reviews_text)
+
+        # Meta-review if available
+        if self.include_reviews and submission.meta_review:
+            meta_text = self._format_meta_review(submission.meta_review)
+            if meta_text:
+                parts.append(f"\n{meta_text}")
+
+        # Include markdown content WITH image references preserved
+        if submission.clean_md:
+            # Allocate remaining token budget to markdown
+            used_chars = sum(len(p) for p in parts)
+            remaining = max(0, int(self.max_tokens * 3.5) - used_chars)
+            if remaining > 1000:
+                truncated_md = self._truncate_text(submission.clean_md, remaining)
+                parts.append(f"\n## Paper Content\n{truncated_md}")
+
+        return "\n".join(parts)
+
+    def get_images(self, submission: SubmissionData) -> Optional[List[str]]:
+        """
+        Returns None - images are resolved inline from markdown references.
+
+        The RayDataPredictor._build_inline_image_messages method handles
+        parsing ![](images/...) references and resolving them using the
+        images_in_clean_md mapping.
+        """
+        return None

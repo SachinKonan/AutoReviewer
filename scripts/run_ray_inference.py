@@ -160,7 +160,7 @@ def main():
         "--max-images",
         type=int,
         default=20,
-        help="Maximum PDF page images",
+        help="Maximum images (PDF pages for images_only, inline for text_with_images)",
     )
 
     # Testing
@@ -168,6 +168,11 @@ def main():
         "--dry-run",
         action="store_true",
         help="Run on 10 samples only (returns pandas DataFrame)",
+    )
+    parser.add_argument(
+        "--visualize-input",
+        action="store_true",
+        help="Print 1 sample input (no inference)",
     )
 
     args = parser.parse_args()
@@ -198,6 +203,71 @@ def main():
         include_markdown=args.include_markdown,
         max_images=args.max_images,
     )
+
+    if args.visualize_input:
+        print("\n*** VISUALIZE INPUT: 1 sample ***")
+        from datasets import load_from_disk
+
+        # Load 1 sample
+        hf_ds = load_from_disk(str(args.dataset_path))
+        row = hf_ds[args.split][0]
+
+        # Build the preprocessed input (without Ray)
+        submission = predictor._row_to_submission(row)
+        content = predictor.input_formatter.format_content(submission)
+        instruction = predictor.output_handler.get_instruction()
+        prompt = f"{instruction}\n\n{content}"
+
+        # Get images
+        images = predictor.input_formatter.get_images(submission)
+
+        # Get inline image mapping ONLY for TEXT_WITH_IMAGES modality
+        images_in_md = None
+        if predictor.input_modality == InputModality.TEXT_WITH_IMAGES:
+            images_in_md = predictor._parse_images_in_md(row)
+
+        # Build messages
+        messages = predictor._build_messages(prompt, images, images_in_md)
+
+        print("\n" + "=" * 60)
+        print("SUBMISSION INFO")
+        print("=" * 60)
+        print(f"ID: {submission.submission_id}")
+        print(f"Year: {submission.year}")
+        print(f"Title: {submission.title}")
+        print(f"Decision: {submission.decision}")
+
+        print("\n" + "=" * 60)
+        print("INPUT FORMATTER")
+        print("=" * 60)
+        print(f"Type: {type(predictor.input_formatter).__name__}")
+        print(f"Modality: {predictor.input_modality}")
+
+        print("\n" + "=" * 60)
+        print("MESSAGES STRUCTURE")
+        print("=" * 60)
+        for i, msg in enumerate(messages):
+            print(f"\n[Message {i}] role={msg['role']}")
+            content = msg["content"]
+            if isinstance(content, str):
+                print(f"  Type: text ({len(content):,} chars)")
+                print(f"  Preview: {content[:500]}...")
+            elif isinstance(content, list):
+                print(f"  Type: multimodal ({len(content)} parts)")
+                for j, part in enumerate(content):
+                    if part.get("type") == "text":
+                        text = part.get("text", "")
+                        print(f"    [{j}] text: {len(text):,} chars")
+                        if j == 0:
+                            print(f"        Preview: {text[:300]}...")
+                    elif part.get("type") == "image":
+                        print(f"    [{j}] image: {part.get('image', '')}")
+
+        print("\n" + "=" * 60)
+        print("FULL PROMPT")
+        print("=" * 60)
+        print(prompt)
+        return
 
     if args.dry_run:
         print("\n*** DRY RUN: 10 samples ***")
